@@ -1,0 +1,249 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../features/auth/domain/auth_status.dart';
+import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/auth/presentation/screens/login_screen.dart';
+import '../../features/auth/presentation/screens/register_screen.dart';
+import '../../features/duels/presentation/screens/duels_screen.dart';
+import '../../features/groups/presentation/screens/create_group_screen.dart';
+import '../../features/groups/presentation/screens/group_detail_screen.dart';
+import '../../features/groups/presentation/screens/group_picker_screen.dart';
+import '../../features/groups/presentation/screens/groups_list_screen.dart';
+import '../../features/groups/presentation/screens/join_group_screen.dart';
+import '../../features/profile/presentation/screens/delete_account_screen.dart';
+import '../../features/profile/presentation/screens/notification_settings_screen.dart';
+import '../../features/profile/presentation/screens/profile_screen.dart';
+import '../../features/ranking/presentation/screens/ranking_screen.dart';
+import '../../features/shell/presentation/shell_screen.dart';
+import '../../features/tournaments/presentation/screens/tournament_detail_screen.dart';
+import '../../features/tournaments/presentation/screens/tournaments_screen.dart';
+import '../../features/watchlist/presentation/screens/watchlist_screen.dart';
+
+/// Nomi delle rotte.
+///
+/// Centralizzati perche' [redirect] e le schermate devono concordare: una
+/// rotta scritta a mano in due posti diverge appena una viene cambiata.
+class AppRoutes {
+  const AppRoutes._();
+
+  static const String home = '/';
+  static const String login = '/login';
+  static const String register = '/register';
+
+  static const String groups = '/groups';
+  static const String createGroup = '/groups/create';
+  static const String joinGroup = '/groups/join';
+
+  /// Selettori di gruppo delle sezioni per gruppo.
+  ///
+  /// Sono le rotte delle voci globali della shell, dove il gruppo non e' noto.
+  /// Ogni rotta con `:groupId` sotto resta quella vera: il selettore sparisce
+  /// appena l'utente sceglie.
+  static const String rankingPicker = '/ranking';
+  static const String watchlistPicker = '/watchlist';
+  static const String duelsPicker = '/duels';
+  static const String tournamentsPicker = '/tournaments';
+
+  /// Classifica di un gruppo specifico.
+  ///
+  /// Fuori da [AppRoutes.groups] perche' la si raggiunge dal dettaglio di un
+  /// gruppo, dove il gruppo e' gia' noto: qui e' un parametro, non parte
+  /// dell'elenco dei gruppi.
+  static String ranking(String groupId) => '/ranking/$groupId';
+
+  /// Watchlist personale dentro un gruppo specifico.
+  ///
+  /// Sullo stesso percorso della classifica per lo stesso motivo: `watchlists`
+  /// ha `group_id` fra le colonne, quindi la watchlist di un gruppo e' un
+  /// insieme diverso da quello di un altro.
+  static String watchlist(String groupId) => '/watchlist/$groupId';
+
+  /// Duelli e classifica Elo di un gruppo specifico.
+  ///
+  /// Come la classifica e la watchlist, anche i duelli stanno per gruppo: la
+  /// tabella `duels` ha `group_id`, quindi gli Elo di un gruppo non hanno
+  /// senso mescolati a quelli di un altro.
+  static String duels(String groupId) => '/duels/$groupId';
+
+  /// Tornei di un gruppo e tabellone di un torneo.
+  ///
+  /// Il tabellone ha un parametro in piu' del gruppo (`tournamentId`) perche' il
+  /// backend non ha una pagina "torneo per gruppo": ogni torneo si raggiunge
+  /// dal proprio id, gia' noto dalla lista.
+  static String tournaments(String groupId) => '/tournaments/$groupId';
+
+  static String tournamentDetail(String groupId, String tournamentId) =>
+      '/tournaments/$groupId/$tournamentId';
+
+  static const String profile = '/profile';
+  static const String notificationSettings = '/profile/notifications';
+  static const String deleteAccount = '/profile/delete';
+
+  /// Costruisce la rotta di un gruppo specifico.
+  static String groupDetail(String id) => '/groups/$id';
+
+  /// Rotte raggiungibili senza sessione.
+  static const Set<String> public = {login, register};
+}
+
+/// Router dell'app.
+///
+/// Il `redirect` e' l'unico punto che decide dove l'utente può andare. Le
+/// schermate non chiamano `context.go` per spostarsi dopo il login: quando la
+/// sessione arriva, il router ri-valuta da solo e porta alla schermata giusta.
+/// Se invece fosse una schermata a decidere, si aprirebbe la porta a schermate
+/// raggiungibili "per sbaglio" mentre la sessione non e' ancora valida.
+final appRouterProvider = Provider<GoRouter>((ref) {
+  // GoRouter non si ricostruisce a ogni cambio di stato, quindi va avvisato
+  // esplicitamente. Un ValueNotifier minimale basta: il router non guarda il
+  // valore, gli interessa solo la notifica.
+  final refresh = ValueNotifier<int>(0);
+  ref.onDispose(refresh.dispose);
+  ref.listen<AuthStatus>(authStatusProvider, (_, _) => refresh.value++);
+
+  return GoRouter(
+    initialLocation: AppRoutes.home,
+    refreshListenable: refresh,
+    routes: [
+      GoRoute(
+        path: AppRoutes.home,
+        builder: (context, state) => const ShellScreen(),
+      ),
+      // Sotto-gruppo dei gruppi: il percorso condivide il prefisso, quindi
+      // ogni schermata di gruppo eredita la protezione dichiarata sotto.
+      GoRoute(
+        path: AppRoutes.groups,
+        builder: (context, state) => const GroupsListScreen(),
+        routes: [
+          GoRoute(
+            path: 'create',
+            builder: (context, state) => const CreateGroupScreen(),
+          ),
+          GoRoute(
+            path: 'join',
+            builder: (context, state) => const JoinGroupScreen(),
+          ),
+          GoRoute(
+            path: ':id',
+            builder: (context, state) => GroupDetailScreen(
+              groupId: state.pathParameters['id']!,
+            ),
+          ),
+        ],
+      ),
+      // Le quattro sezioni per gruppo hanno una rotta senza `groupId`, che fa
+      // scegliere il gruppo, e una con `groupId`, che e' la sezione vera.
+      // Sono rotte distinte e non una con parametro opzionale: un parametro
+      // che puo' mancare farebbe dipendere il comportamento dal posto da cui
+      // si arriva, mentre qui la scelta e' sempre esplicita e resta nella
+      // cronologia.
+      GoRoute(
+        path: AppRoutes.rankingPicker,
+        builder: (_, _) => const GroupPickerScreen(section: GroupSection.ranking),
+      ),
+      GoRoute(
+        path: AppRoutes.watchlistPicker,
+        builder: (_, _) => const GroupPickerScreen(section: GroupSection.watchlist),
+      ),
+      GoRoute(
+        path: AppRoutes.duelsPicker,
+        builder: (_, _) => const GroupPickerScreen(section: GroupSection.duels),
+      ),
+      GoRoute(
+        path: AppRoutes.tournamentsPicker,
+        builder: (_, _) => const GroupPickerScreen(section: GroupSection.tournaments),
+      ),
+      // La classifica sta su un percorso proprio: dentro `/groups/:id`
+      // sostituirebbe il dettaglio del gruppo, che resta la schermata da cui si
+      // parte, e servirebbe un terzo parametro sulla stessa rotta.
+      GoRoute(
+        path: '/ranking/:groupId',
+        builder: (context, state) => RankingScreen(
+          groupId: state.pathParameters['groupId']!,
+          // Il nome del gruppo viaggia in `extra`, non nel percorso: serve solo
+          // al titolo e deve poter mancare (rotta aperta a mano, deep link), e
+          // un parametro di percorso che si puo' omettere romperebbe la
+          // navigazione indietro.
+          groupName: state.extra as String?,
+        ),
+      ),
+      GoRoute(
+        path: '/watchlist/:groupId',
+        builder: (context, state) => WatchlistScreen(
+          groupId: state.pathParameters['groupId']!,
+          groupName: state.extra as String?,
+        ),
+      ),
+      GoRoute(
+        path: '/duels/:groupId',
+        builder: (context, state) => DuelsScreen(
+          groupId: state.pathParameters['groupId']!,
+          groupName: state.extra as String?,
+        ),
+      ),
+      GoRoute(
+        path: '/tournaments/:groupId',
+        builder: (context, state) => TournamentsScreen(
+          groupId: state.pathParameters['groupId']!,
+          groupName: state.extra as String?,
+        ),
+        routes: [
+          GoRoute(
+            path: ':tournamentId',
+            builder: (context, state) => TournamentDetailScreen(
+              tournamentId: state.pathParameters['tournamentId']!,
+              groupId: state.pathParameters['groupId']!,
+              // `canDelete` e' deciso dal ruolo nel gruppo, che il router non
+              // conosce: viaggia in `extra` come il nome del gruppo. Se manca
+              // (deep link) il menu non compare, che e' il comportamento
+              // corretto per un ruolo sconosciuto.
+              canDelete: state.extra as bool? ?? false,
+            ),
+          ),
+        ],
+      ),
+      // Sotto-gruppo del profilo: le schermate di impostazioni e cancellazione
+      // sono raggiungibili solo da un utente collegato, quindi stanno sotto
+      // `/profile` che non e' in AppRoutes.public.
+      GoRoute(
+        path: AppRoutes.profile,
+        builder: (context, state) => const ProfileScreen(),
+        routes: [
+          GoRoute(
+            path: 'notifications',
+            builder: (context, state) => const NotificationSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'delete',
+            builder: (context, state) => const DeleteAccountScreen(),
+          ),
+        ],
+      ),
+      GoRoute(
+        path: AppRoutes.login,
+        builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.register,
+        builder: (context, state) => const RegisterScreen(),
+      ),
+    ],
+    redirect: (context, state) {
+      final isPublic = AppRoutes.public.contains(state.matchedLocation);
+
+      return switch (ref.read(authStatusProvider)) {
+        // Collegato: la schermata di login o registrazione non ha senso, si
+        // torna alla home. Il nome della rotta (/login) verrebbe sostituito
+        // da go() che pila la cronologia: replace() non lascia un "indietro"
+        // che rimanderebbe al login dopo il logout.
+        AuthSignedIn() when isPublic => AppRoutes.home,
+        // Scollegato: qualsiasi rotta privata rimanda al login, cosi' non si
+        // resta su una pagina che mostrerebbe dati vuoti o un errore.
+        AuthSignedOut() when !isPublic => AppRoutes.login,
+        _ => null,
+      };
+    },
+  );
+});
