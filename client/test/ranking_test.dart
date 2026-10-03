@@ -8,6 +8,7 @@ import 'package:animerank/features/ranking/data/ranking_repository.dart';
 import 'package:animerank/features/ranking/domain/ranking.dart';
 import 'package:animerank/features/ranking/presentation/ranking_controller.dart';
 import 'package:animerank/features/ranking/presentation/screens/ranking_screen.dart';
+import 'package:animerank/features/ranking/presentation/widgets/rank_podium.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -933,16 +934,16 @@ void main() {
       expect(r.offsets, [0]);
 
       // Solo la tab visibile scorre: le altre tre liste sono costruite ma fuori
-      // schermo, quindi `find.byType(ListView)` le troverebbe e il trascinamento
-      // non toccherebbe nulla.
-      await tester.drag(find.byType(ListView).hitTestable(), const Offset(0, -6000));
+      // schermo, quindi il finder le troverebbe e il trascinamento non
+      // toccherebbe nulla.
+      await tester.drag(find.byType(CustomScrollView).hitTestable(), const Offset(0, -6000));
       await tester.pumpAndSettle();
 
       expect(r.offsets, [0, RankingPage.size]);
 
       // La lista tiene solo le righe vicine allo schermo: l'ultima posizione
       // si verifica solo dopo averci tornato con un altro scorrimento.
-      await tester.drag(find.byType(ListView).hitTestable(), const Offset(0, -6000));
+      await tester.drag(find.byType(CustomScrollView).hitTestable(), const Offset(0, -6000));
       await tester.pumpAndSettle();
 
       expect(find.text('${RankingPage.size + 10}'), findsOneWidget);
@@ -974,7 +975,7 @@ void main() {
       // Il guasto arriva dopo la prima pagina, non prima: un errore sul
       // caricamento iniziale mostrerebbe invece la schermata di errore.
       r.rankingFailure = const RankingFailure('Rete assente.');
-      await tester.drag(find.byType(ListView).hitTestable(), const Offset(0, -6000));
+      await tester.drag(find.byType(CustomScrollView).hitTestable(), const Offset(0, -6000));
       await tester.pumpAndSettle();
 
       // Le righe gia' caricate restano: un errore sul caricamento successivo
@@ -1026,8 +1027,10 @@ void main() {
           ),
       );
 
-      expect(find.text('Membri'), findsOneWidget);
-      expect(find.text('Anime votati'), findsOneWidget);
+      // Le etichette sono in maiuscoletto: sono parole di contesto, non titoli, e
+      // in minuscolo sembrerebbero parte del dato.
+      expect(find.text('MEMBRI'), findsOneWidget);
+      expect(find.text('ANIME VOTATI'), findsOneWidget);
       expect(find.text('7.25'), findsOneWidget);
     });
 
@@ -1035,14 +1038,22 @@ void main() {
       await pump(
         tester,
         repository: FakeRankingRepository(initial: [
-          buildRankingEntry(position: 3, positionDelta: 2),
-          buildRankingEntry(animeId: 'a2', title: 'Altro', position: 7, positionDelta: -3),
+          // Le prime tre finiscono sul podio, che mostra la posizione e non la
+          // variazione: la variazione si verifica sulle righe che restano nella
+          // lista, ed e' li' che ha spazio per stare accanto al numero.
+          buildRankingEntry(animeId: 'p1', position: 1),
+          buildRankingEntry(animeId: 'p2', position: 2),
+          buildRankingEntry(animeId: 'p3', position: 3),
+          buildRankingEntry(position: 7, positionDelta: 2),
+          buildRankingEntry(animeId: 'a2', title: 'Altro', position: 9, positionDelta: -3),
           buildRankingEntry(animeId: 'a3', title: 'Terzo', position: 5, positionDelta: 0),
         ]),
       );
 
-      expect(find.text('+2'), findsOneWidget);
-      expect(find.text('-3'), findsOneWidget);
+      // Freccia oltre il segno: il "+2" da solo dice che il numero e' cambiato,
+      // la freccia dice in che verso.
+      expect(find.text('↑2'), findsOneWidget);
+      expect(find.text('↓3'), findsOneWidget);
       // Nessuna variazione non e' "nessuna informazione": e' che lo snapshot di
       // ieri coincide, e un "+0" occuperebbe spazio per dire niente.
       expect(find.text('+0'), findsNothing);
@@ -1153,8 +1164,101 @@ void main() {
 
       // "3" senza etichetta potrebbe essere voti o media: sono due numeri
       // diversi e l'utente non deve indovinare quale sia quale.
-      expect(find.text('Voti'), findsOneWidget);
-      expect(find.text('Media'), findsOneWidget);
+      expect(find.text('VOTI'), findsOneWidget);
+      expect(find.text('MEDIA'), findsOneWidget);
+    });
+
+    group('podio', () {
+      testWidgets('i primi tre posti stanno sul podio e la lista riprende dal quarto',
+          (tester) async {
+        await pump(
+          tester,
+          repository: FakeRankingRepository(initial: [
+            buildRankingEntry(animeId: 'a1', title: 'Primo', position: 1),
+            buildRankingEntry(animeId: 'a2', title: 'Secondo', position: 2),
+            buildRankingEntry(animeId: 'a3', title: 'Terzo', position: 3),
+            buildRankingEntry(animeId: 'a4', title: 'Quarto', position: 4),
+          ]),
+        );
+
+        final podium = find.byType(RankPodium);
+        expect(podium, findsOneWidget);
+        expect(find.descendant(of: podium, matching: find.text('Primo')), findsOneWidget);
+        expect(find.descendant(of: podium, matching: find.text('Secondo')), findsOneWidget);
+        expect(find.descendant(of: podium, matching: find.text('Terzo')), findsOneWidget);
+        // Il quarto non e' sul podio: se lo fosse, il podio mostrerebbe quattro
+        // posti e la classifica direbbe che il quarto posto e' sul podio.
+        expect(find.descendant(of: podium, matching: find.text('Quarto')), findsNothing);
+
+        // Ogni titolo una volta sola: la stessa posizione mostrata dal podio e
+        // dalla lista si riconoscerebbe subito come un doppio.
+        expect(find.text('Primo'), findsOneWidget);
+        expect(find.text('Secondo'), findsOneWidget);
+        expect(find.text('Terzo'), findsOneWidget);
+
+        // Il quarto e' in lista. Va portato in vista perche' la lista e' a
+        // sliver e le righe sotto il bordo non sono costruite.
+        await tester.drag(find.byType(CustomScrollView).hitTestable(), const Offset(0, -600));
+        await tester.pumpAndSettle();
+        expect(find.text('Quarto'), findsOneWidget);
+      });
+
+      testWidgets('sotto i tre posti non c e un podio', (tester) async {
+        // Con una o due righe il podio mostrerebbe una o due colonne sole al
+        // centro dello schermo: non e' un podio, e' una lista con un formato
+        // diverso. Sotto la soglia restano righe normali.
+        await pump(
+          tester,
+          repository: FakeRankingRepository(initial: [
+            buildRankingEntry(animeId: 'a1', title: 'Uno', position: 1),
+            buildRankingEntry(animeId: 'a2', title: 'Due', position: 2),
+          ]),
+        );
+
+        expect(find.byType(RankPodium), findsNothing);
+        expect(find.text('Uno'), findsOneWidget);
+        expect(find.text('Due'), findsOneWidget);
+      });
+
+      testWidgets('su telefono stretto il podio non sborda', (tester) async {
+        // La larghezza delle copertine viene calcolata sullo spazio che resta
+        // e la colonna centrale e' la piu' larga: su 320px e' il punto in cui
+        // il podio esce dallo schermo. Il test fallisce da solo se una riga
+        // traboccasce, quindi basta disegnarlo.
+        await pump(
+          tester,
+          size: const Size(320, 640),
+          repository: FakeRankingRepository(initial: [
+            buildRankingEntry(animeId: 'a1', title: 'Primo posto con un titolo lunghissimo', position: 1),
+            buildRankingEntry(animeId: 'a2', title: 'Secondo', position: 2),
+            buildRankingEntry(animeId: 'a3', title: 'Terzo', position: 3),
+            buildRankingEntry(animeId: 'a4', title: 'Quarto', position: 4),
+          ]),
+        );
+
+        expect(find.byType(RankPodium), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('anche le classifiche speciali hanno il podio', (tester) async {
+        await pump(
+          tester,
+          repository: FakeRankingRepository(initial: [
+            buildRankingEntry(animeId: 'a1', title: 'Primo', position: 1, voteCount: 9),
+            buildRankingEntry(animeId: 'a2', title: 'Secondo', position: 2, voteCount: 8),
+            buildRankingEntry(animeId: 'a3', title: 'Terzo', position: 3, voteCount: 7),
+            buildRankingEntry(animeId: 'a4', title: 'Quarto', position: 4, voteCount: 6),
+          ]),
+        );
+
+        await tester.tap(find.text('Più amati'));
+        await tester.pumpAndSettle();
+
+        final podium = find.byType(RankPodium);
+        expect(podium, findsOneWidget);
+        expect(find.descendant(of: podium, matching: find.text('Primo')), findsOneWidget);
+        expect(find.descendant(of: podium, matching: find.text('Quarto')), findsNothing);
+      });
     });
 
     testWidgets('su schermo largo la classifica diventa tabella', (tester) async {

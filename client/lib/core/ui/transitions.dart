@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -164,6 +166,14 @@ class _ArRevealState extends State<ArReveal> with SingleTickerProviderStateMixin
     end: Offset.zero,
   ).animate(CurvedAnimation(parent: _controller, curve: ArMotion.enter));
 
+  /// Ritardo ancora in corso, se l'elemento non e' ancora partito.
+  ///
+  /// Va conservato per poterlo annullare: un `Future.delayed` non si puo'
+  /// richiamare indietro, quindi senza questo timer un elemento che esce dalla
+  /// lista mentre aspettava resterebbe vivo fino a scadere e proverebbe ad
+  /// animare un controller gia' smontato.
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
@@ -175,18 +185,16 @@ class _ArRevealState extends State<ArReveal> with SingleTickerProviderStateMixin
       // insieme al resto dello schermo o non partirebbe.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Future<void>.delayed(
-          Duration(milliseconds: widget.delayMs),
-          () {
-            if (mounted) _controller.forward();
-          },
-        );
+        _timer = Timer(Duration(milliseconds: widget.delayMs), () {
+          if (mounted) _controller.forward();
+        });
       });
     }
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _controller.dispose();
     super.dispose();
   }
