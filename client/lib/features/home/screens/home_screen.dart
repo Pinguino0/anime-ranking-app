@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/content_row.dart';
 import '../../../core/ui/poster_card.dart';
 import '../../anime/domain/anime.dart';
+import '../../auth/presentation/auth_controller.dart';
 import '../home_controller.dart';
 
 /// Home dell'app: righe di poster da sfogliare.
@@ -25,6 +26,8 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final feed = ref.watch(homeFeedProvider);
     final theme = Theme.of(context);
+    final email = ref.watch(authStatusProvider).user?.email;
+    final pagePadding = ArSpace.page(context);
 
     return Scaffold(
       body: RefreshIndicator(
@@ -35,18 +38,46 @@ class HomeScreen extends ConsumerWidget {
         child: CustomScrollView(
           slivers: [
             SliverAppBar(
-              pinned: false,
+              pinned: true,
               floating: true,
-              expandedHeight: 132,
-              // Gradiente al posto di uno sfondo pieno: il titolo si stacca dal
-              // nero dello scaffold senza una barra colorata che taglia la
-              // schermata.
+              expandedHeight: 168,
+              // Il titolo e' su due righe e la seconda e' il nome dell'utente:
+              // il nome del servizio da solo ("AnimeRank") occupa una riga
+              // intera senza dire nulla, mentre il nome di chi e' collegato e'
+              // l'informazione che rende la pagina personale.
               flexibleSpace: FlexibleSpaceBar(
-                titlePadding:
-                    const EdgeInsets.only(left: 20, right: 20, bottom: 16),
-                title: Text('AnimeRank', style: theme.textTheme.titleLarge),
+                titlePadding: EdgeInsets.only(
+                  left: pagePadding.left,
+                  right: pagePadding.right,
+                  bottom: 18,
+                ),
+                title: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AnimeRank',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        // Sotto il ritratto non si legge: la barra scorre e il
+                        // titolo viaggia con lei, restando sul nero pieno.
+                        color: theme.brightness == Brightness.dark
+                            ? Colors.white
+                            : theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    if (email != null)
+                      Text(
+                        email.split('@').first,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.7),
+                        ),
+                      ),
+                  ],
+                ),
                 background: const DecoratedBox(
-                  decoration: BoxDecoration(gradient: ArColors.heroScrim),
+                  decoration: BoxDecoration(gradient: ArColors.subtle),
                 ),
               ),
             ),
@@ -120,11 +151,16 @@ class HomeScreen extends ConsumerWidget {
       title: entry.title,
       imageUrl: entry.imageUrl,
       score: entry.score,
+      heroTag: entry.heroTag,
       subtitle: [
         if (entry.year != null) '${entry.year}',
         if (entry.episodes != null) '${entry.episodes} ep',
       ].join(' · '),
-      onTap: () => context.push('${AppRoutes.animeSearch}?q=${Uri.encodeComponent(entry.title)}'),
+      // Toccando un poster si apre la scheda dell'opera, non la ricerca con il
+      // titolo come testo: riaprire la ricerca scopriva di nuovo gli stessi
+      // risultati quando l'utente voleva solo guardare i dettagli di quello che
+      // aveva sotto gli occhi.
+      onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
     );
   }
 }

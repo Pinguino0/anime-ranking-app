@@ -28,3 +28,35 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    # Google Fonts distribuisce ormai solo file variabili: un unico .ttf copre
+    # tutti i pesi. Flutter non ricava il peso da solo, quindi ogni peso e'
+    # dichiarato come voce separata e applicato via `fontVariations` nel tema.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/InterVar.ttf
+        - asset: assets/fonts/InterVar.ttf
+          weight: 400
+        - asset: assets/fonts/InterVar.ttf
+          weight: 500
+        - asset: assets/fonts/InterVar.ttf
+          weight: 600
+        - asset: assets/fonts/InterVar.ttf
+          weight: 700
+        - asset: assets/fonts/InterVar.ttf
+          weight: 800
+    # Display: titoli grandi e intestazioni. Ha un'identita' molto diversa da
+    # Inter (a'Rundata, forme larghe), ed e' quello che distingue l'app da un
+    # tema Material qualsiasi.
+    - family: SpaceGrotesk
+      fonts:
+        - asset: assets/fonts/SpaceGroteskVar.ttf
+        - asset: assets/fonts/SpaceGroteskVar.ttf
+          weight: 400
+        - asset: assets/fonts/SpaceGroteskVar.ttf
+          weight: 500
+        - asset: assets/fonts/SpaceGroteskVar.ttf
+          weight: 600
+        - asset: assets/fonts/SpaceGroteskVar.ttf
+          weight: 700

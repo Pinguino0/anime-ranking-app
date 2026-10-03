@@ -190,8 +190,10 @@ class AnimeSearchController extends AsyncNotifier<List<AnimeEntry>> {
       // un id darebbe un voto destinato a fallire.
       state = AsyncData(_merge(current, page.results));
     } on AnimeFailure catch (e) {
+      _triedRemote = true;
       pagination.failed(e);
     } catch (_) {
+      _triedRemote = true;
       pagination.failed(
         const AnimeFailure('Ricerca online non riuscita. Riprova.'),
       );

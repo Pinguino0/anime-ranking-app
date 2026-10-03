@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:animerank/core/constants/breakpoints.dart';
+import 'package:animerank/core/router/app_router.dart';
 import 'package:animerank/features/anime/data/anime_repository.dart';
 import 'package:animerank/features/anime/domain/anime.dart';
 import 'package:animerank/features/anime/presentation/anime_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 /// Ricerca del catalogo anime.
 ///
@@ -764,6 +766,24 @@ class _EmptyResults extends ConsumerWidget {
       );
     }
 
+    // Mostra caricamento durante la ricerca remota (Jikan): senza feedback
+    // l'utente non capisce se il tap ha fatto qualcosa.
+    if (pagination.isLoadingMore && hasQuery) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Cerco su Jikan...'),
+            ],
+          ),
+        ),
+      );
+    }
+
     final message = hasFilters
         ? 'Nessun anime corrisponde ai filtri.'
         : catalogEmpty
@@ -920,7 +940,11 @@ class AnimeSearchResultCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Poster(url: entry.imageUrl, title: entry.title),
+            _Poster(
+              url: entry.imageUrl,
+              title: entry.title,
+              heroTag: entry.heroTag,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -973,7 +997,12 @@ class AnimeSearchResultCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Poster(url: entry.imageUrl, title: entry.title, height: 96),
+            _Poster(
+              url: entry.imageUrl,
+              title: entry.title,
+              height: 96,
+              heroTag: entry.heroTag,
+            ),
             const SizedBox(height: 6),
             Text(
               entry.title,
@@ -987,17 +1016,18 @@ class AnimeSearchResultCard extends StatelessWidget {
     );
   }
 
-  /// Apre il dettaglio dell'anime.
+  /// Apre la scheda dell'anime.
   ///
-  /// Durante la beta il foglio mostra i dati disponibili senza votare: votare
-  /// richiede un gruppo, e la schermata di ricerca non sa quale sia.
+  /// Va sulla rotta e non su un foglio perche' l'opera ha troppo contenuto per
+  /// stare in mezzo schermo: synopsis, generi, voto e metadati fanno una
+  /// pagina. Il foglio, inoltre, non ha un indirizzo: con il "indietro" del
+  /// sistema tornerebbe alla ricerca ma senza ricaricare i filtri impostati.
+  ///
+  /// L'opera viaggia in `extra` perche' la Edge Function non ha una rotta di
+  /// dettaglio: l'unica copia dei dati e' quella che la ricerca ha gia'
+  /// ricevuto, e perderla significherebbe mostrare una pagina vuota.
   void _showDetail(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => AnimeDetailSheet(entry: entry),
-    );
+    context.push(AppRoutes.animeDetail, extra: entry);
   }
 }
 
@@ -1007,16 +1037,40 @@ class AnimeSearchResultCard extends StatelessWidget {
 /// un fallback che almeno dice di cosa si tratta, e un riquadro grigio non
 /// distingue "non c'e' immagine" da "non ha ancora caricato".
 class _Poster extends StatelessWidget {
-  const _Poster({required this.url, required this.title, this.height = 120});
+  const _Poster({
+    required this.url,
+    required this.title,
+    this.height = 120,
+    this.heroTag,
+  });
 
   final String? url;
   final String title;
   final double height;
 
+  /// Tag dell'hero, se l'immagine vola verso la scheda.
+  final Object? heroTag;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final image = _posterImage(context, theme);
+
+    // L'hero sta solo sull'immagine. Se avvolgesse anche il segnaposto, la
+    // transizione su un anime senza copertina mostrerebbe un rettangolo vuoto
+    // che si trasforma in un'immagine: peggio di non avere nulla.
+    if (heroTag == null) return image;
+
+    return Hero(
+      tag: heroTag!,
+      flightShuttleBuilder: (context, animation, direction, from, to) =>
+          ScaleTransition(scale: animation, child: image),
+      child: image,
+    );
+  }
+
+  Widget _posterImage(BuildContext context, ThemeData theme) {
     if (url == null || url!.isEmpty) {
       return SizedBox(
         width: 78,
@@ -1100,146 +1154,6 @@ class _TrailingInfo extends StatelessWidget {
             ),
         ],
       ],
-    );
-  }
-}
-
-/// Foglio di dettaglio dell'anime.
-class AnimeDetailSheet extends StatelessWidget {
-  const AnimeDetailSheet({required this.entry, super.key});
-
-  final AnimeEntry entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final facts = entry.factsLabel;
-
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.7,
-      maxChildSize: 0.95,
-      builder: (context, scrollController) {
-        return ListView(
-          controller: scrollController,
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Poster(url: entry.imageUrl, title: entry.title, height: 160),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(entry.title, style: theme.textTheme.titleLarge),
-                      if (entry.japaneseTitle != null)
-                        Text(
-                          entry.japaneseTitle!,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      if (facts.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(facts, style: theme.textTheme.bodySmall),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            if (!entry.canRate)
-              // Dichiarazione esplicita invece di un pulsante disabilitato: un
-              // bottone grigio senza spiegazione sembra un bug.
-              Card(
-                color: theme.colorScheme.surfaceContainerHighest,
-                child: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text(
-                    'Questo anime non è ancora in catalogo, quindi non si può '
-                    'votare. Apri la ricerca di nuovo fra un momento: la '
-                    'seconda volta sarà disponibile.',
-                  ),
-                ),
-              ),
-            if (entry.status != null || entry.score != null) ...[
-              _FactRow(
-                label: 'Stato',
-                value: entry.status?.label ?? 'Sconosciuto',
-              ),
-              if (entry.score != null)
-                _FactRow(
-                  label: 'Voto MyAnimeList',
-                  value:
-                      '${entry.score!.toStringAsFixed(2)}'
-                      '${entry.scoredBy != null ? ' su ${entry.scoredBy} voti' : ''}',
-                ),
-              if (entry.studio != null)
-                _FactRow(label: 'Studio', value: entry.studio!),
-              if (entry.duration != null)
-                _FactRow(label: 'Durata', value: entry.duration!),
-            ],
-            if (entry.genres.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('Generi', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final genre in entry.genres)
-                    Chip(
-                      label: Text(genre),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                ],
-              ),
-            ],
-            if (entry.synopsis != null) ...[
-              const SizedBox(height: 16),
-              Text('Trama', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Text(entry.synopsis!, style: theme.textTheme.bodyMedium),
-            ],
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Riga etichetta/valore nel dettaglio.
-class _FactRow extends StatelessWidget {
-  const _FactRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 130,
-            child: Text(
-              label,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
-        ],
-      ),
     );
   }
 }

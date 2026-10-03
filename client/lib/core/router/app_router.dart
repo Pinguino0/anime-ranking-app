@@ -1,10 +1,13 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../ui/transitions.dart';
 import '../../features/auth/domain/auth_status.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
+import '../../features/anime/domain/anime.dart';
+import '../../features/anime/presentation/screens/anime_detail_screen.dart';
 import '../../features/anime/presentation/screens/anime_search_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/duels/presentation/screens/duels_screen.dart';
@@ -99,6 +102,17 @@ class AppRoutes {
   /// lista puo' essere lunga, e mescolarla alle card di navigazione del gruppo
   /// costringerebbe a scorrere tutto per arrivare in fondo ai nomi.
   static String groupMembers(String id) => '/groups/members/$id';
+
+  /// Scheda di un anime.
+  ///
+  /// Fuori da [animeSearch] come rotta a se': e' una pagina, non un filtro, e
+  /// merita un indirizzo proprio perche' si raggiunge anche da un deep link.
+  ///
+  /// Il nome dell'opera viaggia in `extra` e non nel percorso: la Edge Function
+  /// non espone una rotta di dettaglio, quindi l'unica fonte dei dati e' il
+  /// risultato di ricerca che ha gia' l'opera in mano. Un id nel percorso
+  /// suggerirebbe che la pagina si possa ricaricare da sola, e non si puo'.
+  static const String animeDetail = '/anime/detail';
 
   /// Rotte raggiungibili senza sessione.
   static const Set<String> public = {login, register};
@@ -240,6 +254,37 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.animeSearch,
         builder: (context, state) => const AnimeSearchScreen(),
+        routes: [
+          GoRoute(
+            path: 'detail',
+            // `pageBuilder` e non `builder`: e' l'unico modo per dire a
+            // GoRouter di usare una transizione invece del salto istantaneo
+            // di default. Con `builder` l'animazione si perde e la scheda
+            // apparirebbe di colpo, senza il volo dell'immagine.
+            pageBuilder: (context, state) {
+              // `extra` porta l'opera. Se manca — rotta aperta a mano, deep
+              // link, ripristino dopo un crash — non si puo' mostrare nulla di
+              // utile, quindi si torna alla ricerca invece di disegnare una
+              // pagina vuota che sembrerebbe un errore.
+              final entry = state.extra as AnimeEntry?;
+
+              if (entry == null) {
+                return MaterialPage<void>(
+                  name: AppRoutes.animeDetail,
+                  child: const AnimeSearchScreen(),
+                );
+              }
+
+              return arDetailRoute<void>(
+                name: AppRoutes.animeDetail,
+                child: AnimeDetailScreen(
+                  entry: entry,
+                  heroTag: entry.heroTag,
+                ),
+              );
+            },
+          ),
+        ],
       ),
       GoRoute(
         path: AppRoutes.profile,

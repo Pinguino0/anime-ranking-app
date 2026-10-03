@@ -50,3 +50,12 @@ Thumbs.db
 *.log
 tmp/
 temp/
+
+# ---- APK ----
+# Le build debug sono da 200 MB: nel repository occuperebbero piu' di tutto il
+# resto del codice insieme, e non servono a nessuno. La build si rifa con
+# `flutter build apk --debug`, che usa il codice committato.
+*.apk
+
+# I font de Google Fonts sono dentro `client/assets/fonts` e vanno versionati:
+# senza, la build su un'altra macchina uscirebbe con i font di sistema.

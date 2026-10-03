@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import 'poster_card.dart';
+import 'transitions.dart';
 
 /// Riga di contenuto scorrevole in orizzontale, con intestazione.
 ///
@@ -47,6 +48,7 @@ class ContentRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final horizontal = ArSpace.page(context).left;
 
     return Padding(
       padding: padding,
@@ -54,7 +56,7 @@ class ContentRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: EdgeInsets.symmetric(horizontal: horizontal),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -78,15 +80,24 @@ class ContentRow extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: ArSpace.sm),
           SizedBox(
             height: height ?? PosterCard.rowHeight,
+            // Le celle appaiono a ondate. Su una riga lunga, senza, tutte le
+            // locandine comparirebbero insieme quando arriva la pagina e la
+            // pagina sembrerebbe un salto di contenuto.
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: EdgeInsets.symmetric(horizontal: horizontal),
               itemCount: itemCount,
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: itemBuilder,
+              separatorBuilder: (_, _) => const SizedBox(width: ArSpace.sm),
+              itemBuilder: (context, i) => ArReveal(
+                // Il ritardo cresce con la posizione e si ferma: oltre il
+                // limite, le card piu' a destra arriverebbero cosi' tardi che
+                // l'utente le cercherebbe gia' come se mancassero.
+                delayMs: (i * 40).clamp(0, 320),
+                child: itemBuilder(context, i),
+              ),
             ),
           ),
         ],
@@ -121,35 +132,54 @@ class EmptyState extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(ArSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // L'icona ha alone colorato e non un semplice riquadro grigio:
+            // e' l'unico elemento "vivo" di una pagina vuota, e con un bordo
+            // neutro sembrerebbe un'immagine rotta.
             Container(
-              width: 64,
-              height: 64,
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
-                color: colors.surfaceContainerHigh,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    colors.primary.withValues(alpha: 0.18),
+                    colors.secondary.withValues(alpha: 0.08),
+                  ],
+                ),
                 borderRadius: BorderRadius.circular(ArRadii.control),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: 0.25),
+                ),
               ),
-              child: Icon(icon, size: 30, color: colors.onSurfaceVariant),
+              child: Icon(icon, size: 32, color: colors.primary),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: ArSpace.lg),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium,
+              style: theme.textTheme.headlineSmall,
             ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colors.onSurfaceVariant,
+            const SizedBox(height: ArSpace.xs),
+            // Il testo non supera una misura: a schermo largo una riga sola
+            // porterebbe il messaggio a 1400px di larghezza e l'occhio non
+            // saprebbe dove iniziare.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
               ),
             ),
             if (action != null) ...[
-              const SizedBox(height: 24),
+              const SizedBox(height: ArSpace.lg),
               action!,
             ],
           ],

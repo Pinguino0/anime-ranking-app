@@ -137,6 +137,110 @@ class ArRadii {
 
   /// Dialog e menu.
   static const double dialog = 26;
+
+  /// Locandine a tutta pagina: il raggio grande serve a far leggere l'immagine
+  /// come una copertina e non come un banner.
+  static const double poster = 24;
+}
+
+/// Passo della griglia.
+///
+/// I valori sono una progressione fissa (4-8-12-16-24-32-48), non un insieme
+/// di numeri scelti a caso: quando due schermate usano lo stesso passo,
+/// i bordi delle card si allineano da soli e la pagina sembra costruita.
+/// Un `EdgeInsets(16, 14, 18, 12)` qua e' uno spazio di 2 px che si vede.
+class ArSpace {
+  const ArSpace._();
+
+  static const double xxs = 4;
+  static const double xs = 8;
+  static const double sm = 12;
+  static const double md = 16;
+  static const double lg = 24;
+  static const double xl = 32;
+  static const double xxl = 48;
+
+  /// Margine laterale standard delle schermate.
+  ///
+  /// Cresce con la larghezza su tablet e desktop, dove il contenuto ha spazio
+  /// da perdere e i bordi troppo stretti fanno leggere le righe come se
+  /// arrivassero dal margine. Su telefono resta stretto per non sprecare
+  /// schermo.
+  static EdgeInsets page(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width >= 1100) return const EdgeInsets.symmetric(horizontal: xl);
+    if (width >= 700) return const EdgeInsets.symmetric(horizontal: lg);
+    return const EdgeInsets.symmetric(horizontal: md);
+  }
+}
+
+/// Durate delle animazioni.
+///
+/// Una sola scala per tutta l'app: transizioni con durate diverse l'una dopo
+/// l'altra sembrano un'applicazione che "si prepara" invece di una che risponde.
+/// Sono deliberatamente corte. Un'interfaccia snella si riconosce da quanto
+/// velocemente restituisce il controllo a chi tocca.
+class ArMotion {
+  const ArMotion._();
+
+  /// Micro-interazione: cambio di stato su un elemento gia' visibile.
+  static const Duration fast = Duration(milliseconds: 150);
+
+  /// Transizione fra schermate e comparse di contenuto.
+  static const Duration base = Duration(milliseconds: 260);
+
+  /// Ingressi di elementi grandi: apertura di un foglio, cambio di sezione.
+  static const Duration slow = Duration(milliseconds: 420);
+
+  /// Curva standard.
+  ///
+  /// `easeOutCubic` per l'ingresso: l'elemento arriva presto e si assesta,
+  /// che e' come si muove qualcosa di fisico. `easeInOut` per l'uscita, dove
+  /// l'elemento accelera verso la scomparsa.
+  static const Curve enter = Curves.easeOutCubic;
+  static const Curve exit = Curves.easeInCubic;
+}
+
+/// Ombre.
+///
+/// Su fondo scuro l'ombra e' quasi invisibile: quello che stacca davvero una
+/// card dal fondo e' un alone colorato. Per questo qui ci sono due livelli, e
+/// il secondo e' un bagliore del colore di accento: e' quello che fa sembrare
+/// "illuminata" una card in evidenza senza doverla illuminare davvero.
+class ArShadows {
+  const ArShadows._();
+
+  /// Ombra portante delle card galleggianti.
+  ///
+  /// `const` e non un getter perche' non dipende da niente: e' sempre la stessa
+  /// ombra, e renderla disponibile in costante permette a `BoxDecoration` di
+  /// evitare di ricostruire la lista a ogni build.
+  static const List<BoxShadow> card = [
+    BoxShadow(
+      color: Color(0x73000000),
+      blurRadius: 24,
+      offset: Offset(0, 8),
+    ),
+  ];
+
+  /// Alone colorato, per gli elementi in evidenza.
+  static List<BoxShadow> glow(Color color, {double strength = 0.30}) => [
+        BoxShadow(
+          color: color.withValues(alpha: strength),
+          blurRadius: 28,
+          spreadRadius: -6,
+          offset: const Offset(0, 6),
+        ),
+      ];
+
+  /// Ombra morbida per i pannelli che galleggiano sopra al contenuto.
+  static const List<BoxShadow> panel = [
+    BoxShadow(
+      color: Color(0x8C000000),
+      blurRadius: 32,
+      offset: Offset(0, 12),
+    ),
+  ];
 }
 
 /// ThemeMode salvato nelle impostazioni dell'utente.
@@ -145,7 +249,29 @@ enum AppThemeMode { dark, light, system }
 class AppTheme {
   const AppTheme._();
 
-  static const String _fontFamily = 'Roboto';
+  /// Testo e numeri.
+  static const String bodyFont = 'Inter';
+
+  /// Titoli grandi e intestazioni.
+  static const String displayFont = 'SpaceGrotesk';
+
+  /// Famiglia predefinita: display.
+  ///
+  /// I titoli sono la voce piu' forte dell'interfaccia e devono avere una forma
+  /// riconoscibile; il corpo del testo resta su Inter, piu' neutro e leggibile
+  /// a 14px.
+  static const String _fontFamily = displayFont;
+
+  /// Applica il peso reale del font variabile.
+  ///
+  /// Necessario perche' i file scaricati da Google Fonts sono variabili
+  /// (`Inter[opsz,wght]`): senza `fontVariations` Flutter non sa quale
+  /// istanza dell'asse `wght` prendere e il `fontWeight` diventerebbe
+  /// ininfluente, con tutti i testi allo stesso peso.
+  static List<FontVariation> _wght(double weight) => [
+        FontVariation('wght', weight),
+      ];
+
 
   /// Il tema scuro e il default (prompt sezione 28).
   static ThemeData get dark {
@@ -450,76 +576,112 @@ class AppTheme {
 
   static TextTheme _textTheme(ColorScheme scheme) {
     // Scala tipografica stretta: titoli con letter-spacing negativo, che e'
-    // il tratto che rende un'interfaccia moderna invece che " Material 3
-    // di default".
+    // il tratto che rende un'interfaccia moderna invece che "Material 3 di
+    // default". I titoli su Space Grotesk perche' hanno una forma propria e
+    // riconoscibile; il corpo su Inter, che a 14px e' piu' leggibile.
+    //
+    // Nessuno stile qui mette `fontWeight` senza `fontVariations`: sui file
+    // variabili il peso va richiesto all'asse, altrimenti il testo esce
+    // sempre allo stesso peso e tutta la gerarchia si appiattisce.
     return TextTheme(
       displaySmall: TextStyle(
-        fontSize: 34,
-        fontWeight: FontWeight.w800,
-        letterSpacing: -1.2,
+        fontFamily: displayFont,
+        fontSize: 36,
+        fontWeight: FontWeight.w700,
+        fontVariations: _wght(700),
+        letterSpacing: -1.4,
+        color: scheme.onSurface,
+        height: 1.05,
+      ),
+      headlineMedium: TextStyle(
+        fontFamily: displayFont,
+        fontSize: 28,
+        fontWeight: FontWeight.w700,
+        fontVariations: _wght(700),
+        letterSpacing: -1,
         color: scheme.onSurface,
         height: 1.1,
       ),
-      headlineMedium: TextStyle(
-        fontSize: 26,
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.8,
+      headlineSmall: TextStyle(
+        fontFamily: displayFont,
+        fontSize: 22,
+        fontWeight: FontWeight.w700,
+        fontVariations: _wght(700),
+        letterSpacing: -0.6,
         color: scheme.onSurface,
         height: 1.15,
       ),
-      headlineSmall: TextStyle(
-        fontSize: 21,
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.5,
-        color: scheme.onSurface,
-        height: 1.2,
-      ),
       titleLarge: TextStyle(
-        fontSize: 18,
+        fontFamily: displayFont,
+        fontSize: 19,
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
+        fontVariations: _wght(700),
+        letterSpacing: -0.4,
         color: scheme.onSurface,
       ),
       titleMedium: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 15,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
+        fontVariations: _wght(600),
         letterSpacing: -0.2,
         color: scheme.onSurface,
       ),
       titleSmall: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 13,
         fontWeight: FontWeight.w600,
+        fontVariations: _wght(600),
         color: scheme.onSurface,
       ),
       bodyLarge: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 15,
-        height: 1.5,
+        fontWeight: FontWeight.w400,
+        fontVariations: _wght(400),
+        height: 1.55,
         color: scheme.onSurface,
       ),
       bodyMedium: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 14,
-        height: 1.5,
+        fontWeight: FontWeight.w400,
+        fontVariations: _wght(400),
+        height: 1.55,
         color: scheme.onSurface,
       ),
       bodySmall: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 12.5,
-        height: 1.45,
+        fontWeight: FontWeight.w400,
+        fontVariations: _wght(400),
+        height: 1.5,
         color: scheme.onSurfaceVariant,
       ),
       labelLarge: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 13,
         fontWeight: FontWeight.w700,
+        fontVariations: _wght(700),
+        letterSpacing: 0.1,
         color: scheme.onSurface,
       ),
       labelMedium: TextStyle(
+        fontFamily: bodyFont,
         fontSize: 11.5,
         fontWeight: FontWeight.w600,
+        fontVariations: _wght(600),
         color: scheme.onSurfaceVariant,
       ),
+      // Le etichette piccole hanno letter-spacing positivo: sono maiuscolette di
+      // sezione, e la spaziatura e' quello che le fa leggere come intestazioni
+      // invece che come testo più piccolo.
       labelSmall: TextStyle(
-        fontSize: 10.5,
+        fontFamily: bodyFont,
+        fontSize: 11,
         fontWeight: FontWeight.w600,
-        letterSpacing: .4,
+        fontVariations: _wght(600),
+        letterSpacing: 1.1,
         color: scheme.onSurfaceVariant,
       ),
     );

@@ -185,6 +185,16 @@ class AnimeEntry {
   /// true se l'opera e' gia' nel catalogo locale e [id] e' utilizzabile.
   final bool inCatalog;
 
+  /// Tag per la transizione condivisa fra la card e la scheda.
+  ///
+  /// Deve essere unico per opera e non per posizione: nella stessa schermata due
+  /// card con lo stesso titolo mostrerebbero la stessa immagine che vola verso
+  /// la scheda, e a meta' del volo si vedrebbe un poster saltare dal posto
+  /// sbagliato. L'id esterno e' la chiave giusta perche' identifica l'opera e
+  /// non la sua posizione nella lista, quindi resta valido anche se la lista
+  /// viene ricaricata mentre la scheda e' aperta.
+  Object get heroTag => 'anime-${externalId.isEmpty ? title : externalId}';
+
   /// true se si puo' votare questo anime in un gruppo.
   ///
   /// E' [inCatalog] e non basta: senza `id` non c'e' la riga da votare. Il
