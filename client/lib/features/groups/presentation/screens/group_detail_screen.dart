@@ -7,6 +7,7 @@ import '../../../../core/error/app_failure.dart';
 import '../../../../core/router/app_router.dart';
 import '../../domain/group.dart';
 import '../groups_controller.dart';
+import 'group_invites_section.dart';
 
 /// Dettaglio di un gruppo: codice invito e amministrazione.
 ///
@@ -100,7 +101,9 @@ class _DetailState extends ConsumerState<_Detail> {
     }
 
     try {
-      final code = await ref.read(groupsListProvider.notifier).regenerateInviteCode(widget.group.id);
+      final code = await ref
+          .read(groupsListProvider.notifier)
+          .regenerateInviteCode(widget.group.id);
       messenger.showSnackBar(SnackBar(content: Text('Nuovo codice: $code')));
     } on GroupsFailure catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
@@ -160,7 +163,10 @@ class _DetailState extends ConsumerState<_Detail> {
     try {
       await ref
           .read(groupsListProvider.notifier)
-          .transferOwnership(groupId: widget.group.id, newOwnerId: newOwner.userId);
+          .transferOwnership(
+            groupId: widget.group.id,
+            newOwnerId: newOwner.userId,
+          );
       messenger.showSnackBar(
         SnackBar(content: Text('Proprieta passata a ${newOwner.label}.')),
       );
@@ -235,14 +241,19 @@ class _DetailState extends ConsumerState<_Detail> {
             icon: Icons.compare_arrows,
             title: 'Duelli',
             subtitle: 'Metti in gara due anime e guarda chi vince.',
-            onTap: () => context.push(AppRoutes.duels(group.id), extra: group.name),
+            onTap: () =>
+                context.push(AppRoutes.duels(group.id), extra: group.name),
           ),
           const SizedBox(height: 12),
           _LinkCard(
             icon: Icons.emoji_events_outlined,
             title: 'Tornei',
-            subtitle: 'Un tabellone a eliminazione diretta fra anime del gruppo.',
-            onTap: () => context.push(AppRoutes.tournaments(group.id), extra: group.name),
+            subtitle:
+                'Un tabellone a eliminazione diretta fra anime del gruppo.',
+            onTap: () => context.push(
+              AppRoutes.tournaments(group.id),
+              extra: group.name,
+            ),
           ),
           const SizedBox(height: 12),
           _LinkCard(
@@ -252,6 +263,12 @@ class _DetailState extends ConsumerState<_Detail> {
             onTap: () =>
                 context.push(AppRoutes.watchlist(group.id), extra: group.name),
           ),
+          _LinkCard(
+            icon: Icons.group_outlined,
+            title: 'Membri',
+            subtitle: 'Chi partecipa al gruppo e i suoi ruoli.',
+            onTap: () => context.push(AppRoutes.groupMembers(group.id)),
+          ),
           const SizedBox(height: 24),
 
           if (group.canSeeInviteCode) ...[
@@ -260,6 +277,14 @@ class _DetailState extends ConsumerState<_Detail> {
               busy: _busy,
               onRegenerate: _regenerate,
             ),
+            const SizedBox(height: 24),
+
+            // Gli inviti singoli stanno sotto il codice del gruppo, non
+            // accanto: il codice e' l'accesso permanente del gruppo, gli inviti
+            // sono accessi singoli che scadono. In questo ordine l'utente
+            // arriva al caso comune per primo e trova il caso particolare
+            // sotto, senza dover scegliere quale delle due cose cercare.
+            GroupInvitesSection(groupId: group.id),
             const SizedBox(height: 24),
           ],
 
@@ -276,9 +301,12 @@ class _DetailState extends ConsumerState<_Detail> {
           const SizedBox(height: 8),
           Text(
             switch (group.myRole) {
-              GroupRole.owner => 'Puoi amministrare il gruppo e gestire i ruoli.',
-              GroupRole.admin => 'Puoi amministrare il gruppo ed espellere i membri.',
-              GroupRole.member => 'Puoi votare e commentare. Chiedi a un admin per altro.',
+              GroupRole.owner =>
+                'Puoi amministrare il gruppo e gestire i ruoli.',
+              GroupRole.admin =>
+                'Puoi amministrare il gruppo ed espellere i membri.',
+              GroupRole.member =>
+                'Puoi votare e commentare. Chiedi a un admin per altro.',
             },
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -350,7 +378,8 @@ class _NewOwnerSheet extends ConsumerWidget {
                     Text('$error', textAlign: TextAlign.center),
                     const SizedBox(height: 12),
                     OutlinedButton(
-                      onPressed: () => ref.invalidate(groupMembersProvider(groupId)),
+                      onPressed: () =>
+                          ref.invalidate(groupMembersProvider(groupId)),
                       child: const Text('Riprova'),
                     ),
                   ],
@@ -358,7 +387,10 @@ class _NewOwnerSheet extends ConsumerWidget {
               ),
             ),
             data: (rows) {
-              final candidates = [for (final m in rows) if (m.canReceiveOwnership) m];
+              final candidates = [
+                for (final m in rows)
+                  if (m.canReceiveOwnership) m,
+              ];
 
               if (candidates.isEmpty) {
                 return Center(
@@ -385,8 +417,8 @@ class _NewOwnerSheet extends ConsumerWidget {
                   Text(
                     'Chi scegli diventa owner e puo\' eliminare il gruppo.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Expanded(
@@ -399,14 +431,18 @@ class _NewOwnerSheet extends ConsumerWidget {
                           leading: member.avatarUrl == null
                               ? CircleAvatar(child: Text(_initial(member)))
                               : CircleAvatar(
-                                  backgroundImage: NetworkImage(member.avatarUrl!),
+                                  backgroundImage: NetworkImage(
+                                    member.avatarUrl!,
+                                  ),
                                 ),
                           title: Text(member.label),
                           subtitle: Text(member.role.label),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () async {
                             if (await onConfirm(member)) {
-                              if (context.mounted) Navigator.of(context).pop(member);
+                              if (context.mounted) {
+                                Navigator.of(context).pop(member);
+                              }
                             }
                           },
                         );
@@ -491,7 +527,11 @@ class _LinkCard extends StatelessWidget {
 
 /// Scheda con il codice invito, copiabile con un tocco.
 class _InviteCard extends StatelessWidget {
-  const _InviteCard({required this.code, required this.busy, required this.onRegenerate});
+  const _InviteCard({
+    required this.code,
+    required this.busy,
+    required this.onRegenerate,
+  });
 
   final String code;
   final bool busy;

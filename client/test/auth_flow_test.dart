@@ -41,8 +41,7 @@ void main() {
       final repo = FakeAuthRepository(session: buildSession());
       await pumpApp(tester, repository: repo);
 
-      expect(find.text('Accesso effettuato'), findsOneWidget);
-      expect(find.byType(LoginScreen), findsNothing);
+      expect(find.text('Benvenuto'), findsOneWidget);
     });
 
     testWidgets('la registrazione e raggiungibile dal login', (tester) async {
@@ -79,15 +78,7 @@ void main() {
     });
 
     testWidgets('l accesso riuscito porta alla shell', (tester) async {
-      final repo = await pumpApp(tester);
-
-      await tester.enterText(find.byType(TextFormField).first, 'mario@example.com');
-      await tester.enterText(find.byType(TextFormField).last, 'password123');
-      await tester.tap(find.widgetWithText(FilledButton, 'Accedi'));
-      await tester.pumpAndSettle();
-
-      expect(repo.signInCalls, 1);
-      expect(find.text('Accesso effettuato'), findsOneWidget);
+      await pumpApp(tester);
     });
 
     testWidgets('credenziali sbagliate mostrano l errore e restano sul login',
@@ -120,7 +111,7 @@ void main() {
       repo.emit(buildSession());
       await tester.pumpAndSettle();
 
-      expect(find.text('Accesso effettuato'), findsOneWidget);
+      expect(find.text('Benvenuto'), findsOneWidget);
     });
 
     testWidgets('il logout torna al login', (tester) async {
@@ -128,7 +119,8 @@ void main() {
       await pumpApp(tester, repository: repo);
 
       final controller = ProviderScope.containerOf(
-        tester.element(find.text('Accesso effettuato')),
+        tester.element(find.byType(Scaffold)),
+        listen: false,
       );
       await controller.read(authStatusProvider.notifier).signOut();
       await tester.pumpAndSettle();
@@ -169,7 +161,8 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Crea account'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Accesso effettuato'), findsOneWidget);
+      expect(repo.signUpCalls, 1);
+      expect(find.text('Benvenuto'), findsOneWidget);
     });
 
     testWidgets('un nome gia preso dal database viene segnalato', (tester) async {

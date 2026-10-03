@@ -14,9 +14,15 @@ final DateTime _epoch = DateTime(2026, 1, 1);
 /// verificare che la UI chieda davvero al repository e non solo disegni
 /// schermate plausibili.
 class FakeGroupsRepository implements GroupsRepository {
-  FakeGroupsRepository({List<AnimeGroup>? initial}) : _groups = [...?initial];
+  FakeGroupsRepository({List<AnimeGroup>? initial}) : groups = [...?initial];
 
-  final List<AnimeGroup> _groups;
+  /// Gruppi in memoria.
+  ///
+  /// Esposti ai test che devono aggiungere un gruppo dopo la costruzione:
+  /// costruirlo nel costruttore funziona finche' il ruolo e' noto prima, ma
+  /// alcuni test hanno bisogno di impostarlo dopo aver configurato i fallimenti
+  /// del finto.
+  final List<AnimeGroup> groups;
 
   int listCalls = 0;
   int createCalls = 0;
@@ -66,13 +72,18 @@ class FakeGroupsRepository implements GroupsRepository {
   GroupsFailure? leaveFailure;
 
   int _seq = 0;
+  int _inviteSeq = 0;
+
+  int invitesCalls = 0;
+  int createInviteCalls = 0;
+  int revokeInviteCalls = 0;
 
   @override
   Future<List<AnimeGroup>> listMine() async {
     listCalls++;
     final failure = listFailure;
     if (failure != null) throw failure;
-    return List.unmodifiable(_groups);
+    return List.unmodifiable(groups);
   }
 
   @override
@@ -84,13 +95,15 @@ class FakeGroupsRepository implements GroupsRepository {
     final created = AnimeGroup(
       id: 'g${++_seq}',
       name: name.trim(),
-      description: (description?.trim().isEmpty ?? true) ? null : description!.trim(),
+      description: (description?.trim().isEmpty ?? true)
+          ? null
+          : description!.trim(),
       inviteCode: 'ANIME-${_seq.toString().padLeft(6, '0')}',
       ownerId: 'me',
       myRole: GroupRole.owner,
       createdAt: DateTime(2026, 1, 1 + _seq),
     );
-    _groups.add(created);
+    groups.add(created);
     return created;
   }
 
@@ -109,7 +122,7 @@ class FakeGroupsRepository implements GroupsRepository {
       myRole: GroupRole.member,
       createdAt: DateTime(2026, 2, 1 + _seq),
     );
-    _groups.add(joined);
+    groups.add(joined);
     return joined;
   }
 
@@ -118,18 +131,30 @@ class FakeGroupsRepository implements GroupsRepository {
     leaveCalls++;
     final failure = leaveFailure;
     if (failure != null) throw failure;
-    _groups.removeWhere((g) => g.id == groupId);
+    groups.removeWhere((g) => g.id == groupId);
   }
 
   @override
   Future<String> regenerateInviteCode(String groupId) async {
     regenerateCalls++;
-    final index = _groups.indexWhere((g) => g.id == groupId);
+    final index = groups.indexWhere((g) => g.id == groupId);
     if (index == -1) throw const GroupsFailure('Gruppo non trovato.');
     final code = 'ANIME-R$regenerateCalls';
-    _groups[index] = _groups[index].copyWith(inviteCode: code);
+    groups[index] = groups[index].copyWith(inviteCode: code);
     return code;
   }
+
+  /// Ruoli richiesti, come "userId|role".
+  List<String> roleChanges = [];
+
+  /// Espulsioni richieste, come "groupId|userId".
+  List<String> kicked = [];
+
+  /// Errore da sollevare alla prossima chiamata di [setMemberRole].
+  GroupsFailure? setRoleFailure;
+
+  /// Errore da sollevare alla prossima chiamata di [kickMember].
+  GroupsFailure? kickFailure;
 
   @override
   Future<void> setMemberRole({
@@ -138,11 +163,109 @@ class FakeGroupsRepository implements GroupsRepository {
     required GroupRole role,
   }) async {
     setRoleCalls++;
+    roleChanges.add('$userId|${role.name}');
+    final failure = setRoleFailure;
+    if (failure != null) throw failure;
+
+    // Il finto cambia anche i dati, non solo i contatori: i test che disegnano
+    // la schermata devono vedere l'etichetta aggiornata come la vedrebbe
+    // l'utente, altrimenti il piu' importante degli effetti (il ruolo nuovo
+    // accanto al nome) resterebbe da verificare solo a occhio.
+    final index = members.indexWhere((m) => m.userId == userId);
+    if (index != -1) members[index] = _withRole(members[index], role);
   }
 
   @override
-  Future<void> kickMember({required String groupId, required String userId}) async {
+  Future<void> kickMember({
+    required String groupId,
+    required String userId,
+  }) async {
     kickCalls++;
+    kicked.add('$groupId|$userId');
+    final failure = kickFailure;
+    if (failure != null) throw failure;
+
+    members.removeWhere((m) => m.userId == userId);
+  }
+
+  /// Copia di [GroupMember] con un ruolo diverso.
+  GroupMember _withRole(GroupMember member, GroupRole role) => GroupMember(
+    userId: member.userId,
+    username: member.username,
+    avatarUrl: member.avatarUrl,
+    role: role,
+    joinedAt: member.joinedAt,
+  );
+
+  /// Inviti restituiti da [listInvites].
+  List<GroupInvite> invites = [];
+
+  /// Inviti revocati, come id.
+  List<String> revokedInvites = [];
+
+  /// Scadenze richieste alla creazione, come "groupId|days".
+  List<String> createdInvites = [];
+
+  /// Errore da sollevare alla prossima chiamata di [listInvites].
+  GroupsFailure? invitesFailure;
+
+  /// Errore da sollevare alla prossima chiamata di [createInvite].
+  GroupsFailure? createInviteFailure;
+
+  /// Errore da sollevare alla prossima chiamata di [revokeInvite].
+  GroupsFailure? revokeInviteFailure;
+
+  @override
+  Future<List<GroupInvite>> listInvites(String groupId) async {
+    invitesCalls++;
+    final failure = invitesFailure;
+    if (failure != null) throw failure;
+    return List.unmodifiable(invites);
+  }
+
+  @override
+  Future<GroupInvite> createInvite({
+    required String groupId,
+    int? daysValid,
+  }) async {
+    createInviteCalls++;
+    createdInvites.add('$groupId|${daysValid ?? 7}');
+    final failure = createInviteFailure;
+    if (failure != null) throw failure;
+
+    final created = GroupInvite(
+      id: 'inv${++_inviteSeq}',
+      code: 'INV-${_inviteSeq.toString().padLeft(4, '0')}',
+      createdBy: 'me',
+      expiresAt: DateTime.now().add(Duration(days: daysValid ?? 7)),
+      createdAt: DateTime.now(),
+      pending: true,
+    );
+    invites.insert(0, created);
+    return created;
+  }
+
+  @override
+  Future<void> revokeInvite(String inviteId) async {
+    revokeInviteCalls++;
+    revokedInvites.add(inviteId);
+    final failure = revokeInviteFailure;
+    if (failure != null) throw failure;
+
+    final index = invites.indexWhere((i) => i.id == inviteId);
+    if (index != -1) {
+      invites[index] = GroupInvite(
+        id: invites[index].id,
+        code: invites[index].code,
+        createdBy: invites[index].createdBy,
+        expiresAt: invites[index].expiresAt,
+        createdAt: invites[index].createdAt,
+        usedBy: invites[index].usedBy,
+        usedAt: invites[index].usedAt,
+        revokedAt: DateTime.now(),
+        pending: false,
+      );
+    }
   }
 
   @override
@@ -163,8 +286,8 @@ class FakeGroupsRepository implements GroupsRepository {
     final failure = transferFailure;
     if (failure != null) throw failure;
 
-    final index = _groups.indexWhere((g) => g.id == groupId);
-    if (index != -1) _groups[index] = _groups[index].copyWithOwner(newOwnerId);
+    final index = groups.indexWhere((g) => g.id == groupId);
+    if (index != -1) groups[index] = groups[index].copyWithOwner(newOwnerId);
   }
 }
 
@@ -177,13 +300,12 @@ AnimeGroup buildGroup({
   String description = 'Si pausa insieme',
   String inviteCode = 'ANIME-000001',
   GroupRole role = GroupRole.owner,
-}) =>
-    AnimeGroup(
-      id: id,
-      name: name,
-      description: description,
-      inviteCode: inviteCode,
-      ownerId: 'owner-1',
-      myRole: role,
-      createdAt: DateTime(2026, 1, 1),
-    );
+}) => AnimeGroup(
+  id: id,
+  name: name,
+  description: description,
+  inviteCode: inviteCode,
+  ownerId: 'owner-1',
+  myRole: role,
+  createdAt: DateTime(2026, 1, 1),
+);

@@ -19,19 +19,30 @@ void main() {
     test('un errore non ripetibile non viene ritentato', () {
       // Senza questo controllo Riverpod riproverebbe "permessi insufficienti"
       // con backoff e l utente vedrebbe uno spinner al posto dell errore.
-      expect(appRetry(0, const GroupsFailure('Permessi insufficienti.')), isNull);
+      expect(
+        appRetry(0, const GroupsFailure('Permessi insufficienti.')),
+        isNull,
+      );
     });
 
     test('un errore ripetibile viene ritentato con attese crescenti', () {
-      expect(appRetry(0, const GroupsFailure('Riprova.', isRetryable: true)), isNotNull);
+      expect(
+        appRetry(0, const GroupsFailure('Riprova.', isRetryable: true)),
+        isNotNull,
+      );
       expect(
         appRetry(1, const GroupsFailure('Riprova.', isRetryable: true)),
-        greaterThan(appRetry(0, const GroupsFailure('Riprova.', isRetryable: true))!),
+        greaterThan(
+          appRetry(0, const GroupsFailure('Riprova.', isRetryable: true))!,
+        ),
       );
     });
 
     test('i tentativi sono limitati', () {
-      expect(appRetry(3, const GroupsFailure('Riprova.', isRetryable: true)), isNull);
+      expect(
+        appRetry(3, const GroupsFailure('Riprova.', isRetryable: true)),
+        isNull,
+      );
     });
 
     test('un errore non tipizzato non viene ritentato', () {
@@ -89,7 +100,10 @@ void main() {
     test('una risposta incompleta non fa esplodere la lista', () {
       // Campi mancanti o di tipo diverso non devono far cadere tutta la
       // schermata: peggio un gruppo con pochi dati che nessun gruppo.
-      final group = AnimeGroup.parse({'id': 'g2', 'group_members': const <dynamic>[]});
+      final group = AnimeGroup.parse({
+        'id': 'g2',
+        'group_members': const <dynamic>[],
+      });
 
       expect(group.name, 'Senza nome');
       expect(group.myRole, GroupRole.member);
@@ -121,7 +135,7 @@ void main() {
       expect(GroupValidators.nameError('x' * 61), isNotNull);
     });
 
-test('il nome viene contato senza spazi', () {
+    test('il nome viene contato senza spazi', () {
       // Il backend fa trim: uno spazio finale non deve far scartare un nome
       // che l utente considera valido.
       expect(GroupValidators.nameError('  ${'x' * 60}  '), isNull);
@@ -158,10 +172,15 @@ test('il nome viene contato senza spazi', () {
     });
 
     test('un errore resta visibile e il retry riprova', () async {
-      repo.listFailure = const GroupsFailure('Gruppi non disponibili. Riprova.');
+      repo.listFailure = const GroupsFailure(
+        'Gruppi non disponibili. Riprova.',
+      );
       final c = container();
 
-      await expectLater(c.read(groupsListProvider.future), throwsA(isA<GroupsFailure>()));
+      await expectLater(
+        c.read(groupsListProvider.future),
+        throwsA(isA<GroupsFailure>()),
+      );
       expect(c.read(groupsListProvider).hasError, isTrue);
 
       repo.listFailure = null;
@@ -172,11 +191,15 @@ test('il nome viene contato senza spazi', () {
     });
 
     test('la creazione mette il gruppo in cima senza ricaricare', () async {
-      repo = FakeGroupsRepository(initial: [buildGroup(id: 'vecchio', name: 'Vecchio')]);
+      repo = FakeGroupsRepository(
+        initial: [buildGroup(id: 'vecchio', name: 'Vecchio')],
+      );
       final c = container();
       await c.read(groupsListProvider.future);
 
-      final created = await c.read(groupsListProvider.notifier).create(name: 'Nuovo');
+      final created = await c
+          .read(groupsListProvider.notifier)
+          .create(name: 'Nuovo');
 
       // Un reload qui costerebbe una seconda richiesta e, se fallisse,
       // farebbe comparire e sparire il gruppo appena creato.
@@ -194,11 +217,19 @@ test('il nome viene contato senza spazi', () {
 
       // Il backend non crea una seconda riga di appartenenza: la lista
       // mostrerebbe comunque due voci identiche se non si deduplicasse.
-      expect(c.read(groupsListProvider).value!.where((g) => g.id == 'g1'), hasLength(1));
+      expect(
+        c.read(groupsListProvider).value!.where((g) => g.id == 'g1'),
+        hasLength(1),
+      );
     });
 
     test('l uscita toglie il gruppo dalla lista', () async {
-      repo = FakeGroupsRepository(initial: [buildGroup(id: 'g1'), buildGroup(id: 'g2')]);
+      repo = FakeGroupsRepository(
+        initial: [
+          buildGroup(id: 'g1'),
+          buildGroup(id: 'g2'),
+        ],
+      );
       final c = container();
       await c.read(groupsListProvider.future);
 
@@ -213,7 +244,9 @@ test('il nome viene contato senza spazi', () {
       final c = container();
       await c.read(groupsListProvider.future);
 
-      final code = await c.read(groupsListProvider.notifier).regenerateInviteCode('g1');
+      final code = await c
+          .read(groupsListProvider.notifier)
+          .regenerateInviteCode('g1');
 
       // Il codice e' il dato che l utente sta per condividere: non puo'
       // aspettare un ricaricamento per vederlo.
@@ -243,9 +276,18 @@ test('il nome viene contato senza spazi', () {
         initialLocation: '/groups',
         routes: [
           GoRoute(path: '/groups', builder: (_, _) => child),
-          GoRoute(path: '/groups/create', builder: (_, _) => const SizedBox.shrink()),
-          GoRoute(path: '/groups/join', builder: (_, _) => const SizedBox.shrink()),
-          GoRoute(path: '/groups/:id', builder: (_, _) => const SizedBox.shrink()),
+          GoRoute(
+            path: '/groups/create',
+            builder: (_, _) => const SizedBox.shrink(),
+          ),
+          GoRoute(
+            path: '/groups/join',
+            builder: (_, _) => const SizedBox.shrink(),
+          ),
+          GoRoute(
+            path: '/groups/:id',
+            builder: (_, _) => const SizedBox.shrink(),
+          ),
         ],
       );
       addTearDown(router.dispose);
@@ -271,10 +313,12 @@ test('il nome viene contato senza spazi', () {
       await pumpScreen(
         tester,
         const GroupsListScreen(),
-        repository: FakeGroupsRepository(initial: [
-          buildGroup(id: 'g1', name: 'Sala pausa'),
-          buildGroup(id: 'g2', name: 'Stanza uno', role: GroupRole.member),
-        ]),
+        repository: FakeGroupsRepository(
+          initial: [
+            buildGroup(id: 'g1', name: 'Sala pausa'),
+            buildGroup(id: 'g2', name: 'Stanza uno', role: GroupRole.member),
+          ],
+        ),
       );
 
       expect(find.text('Sala pausa'), findsOneWidget);
@@ -285,7 +329,8 @@ test('il nome viene contato senza spazi', () {
     });
 
     testWidgets('un errore di caricamento offre il retry', (tester) async {
-      final failing = FakeGroupsRepository()..listFailure = const GroupsFailure('Server assente.');
+      final failing = FakeGroupsRepository()
+        ..listFailure = const GroupsFailure('Server assente.');
       await pumpScreen(tester, const GroupsListScreen(), repository: failing);
 
       expect(find.text('Server assente.'), findsOneWidget);
@@ -309,7 +354,8 @@ test('il nome viene contato senza spazi', () {
     });
 
     testWidgets('la creazione mostra l errore del server', (tester) async {
-      final failing = FakeGroupsRepository()..createFailure = const GroupsFailure('Nome gia usato.');
+      final failing = FakeGroupsRepository()
+        ..createFailure = const GroupsFailure('Nome gia usato.');
       await pumpScreen(tester, const CreateGroupScreen(), repository: failing);
 
       await tester.enterText(find.byType(TextFormField).first, 'Sala pausa');
@@ -320,7 +366,9 @@ test('il nome viene contato senza spazi', () {
       expect(find.text('Crea il gruppo'), findsOneWidget);
     });
 
-    testWidgets('il codice invito viene ripulito e mandato in maiuscolo', (tester) async {
+    testWidgets('il codice invito viene ripulito e mandato in maiuscolo', (
+      tester,
+    ) async {
       await pumpScreen(tester, const JoinGroupScreen());
 
       await tester.enterText(find.byType(TextFormField), 'anime 000001');
@@ -333,7 +381,8 @@ test('il nome viene contato senza spazi', () {
     });
 
     testWidgets('l ingresso mostra l errore del server', (tester) async {
-      final failing = FakeGroupsRepository()..joinFailure = const GroupsFailure('Codice non valido.');
+      final failing = FakeGroupsRepository()
+        ..joinFailure = const GroupsFailure('Codice non valido.');
       await pumpScreen(tester, const JoinGroupScreen(), repository: failing);
 
       await tester.enterText(find.byType(TextFormField), 'ANIME-000001');
@@ -343,7 +392,9 @@ test('il nome viene contato senza spazi', () {
       expect(find.text('Codice non valido.'), findsOneWidget);
     });
 
-    testWidgets('il dettaglio di un gruppo non membro dice subito cosa fare', (tester) async {
+    testWidgets('il dettaglio di un gruppo non membro dice subito cosa fare', (
+      tester,
+    ) async {
       await pumpScreen(
         tester,
         const GroupDetailScreen(groupId: 'g1'),
@@ -357,7 +408,18 @@ test('il nome viene contato senza spazi', () {
       await pumpScreen(
         tester,
         const GroupDetailScreen(groupId: 'g1'),
-        repository: FakeGroupsRepository(initial: [buildGroup(role: GroupRole.owner)]),
+        repository: FakeGroupsRepository(
+          initial: [buildGroup(role: GroupRole.owner)],
+        ),
+      );
+
+      // Anche il codice invito sta in fondo, dopo le card delle sezioni: con la
+      // card "Membri" in piu' non entra nello schermo del test, quindi va
+      // cercato dopo lo scroll come i controlli qui sotto.
+      await tester.scrollUntilVisible(
+        find.text('ANIME-000001'),
+        200,
+        scrollable: find.byType(Scrollable).first,
       );
 
       expect(find.text('ANIME-000001'), findsOneWidget);
@@ -371,24 +433,28 @@ test('il nome viene contato senza spazi', () {
       expect(find.textContaining('Sei l owner'), findsOneWidget);
     });
 
-    testWidgets('un membro semplice vede il pulsante di uscita e nessun codice',
-        (tester) async {
-      await pumpScreen(
-        tester,
-        const GroupDetailScreen(groupId: 'g1'),
-        repository: FakeGroupsRepository(initial: [buildGroup(role: GroupRole.member)]),
-      );
+    testWidgets(
+      'un membro semplice vede il pulsante di uscita e nessun codice',
+      (tester) async {
+        await pumpScreen(
+          tester,
+          const GroupDetailScreen(groupId: 'g1'),
+          repository: FakeGroupsRepository(
+            initial: [buildGroup(role: GroupRole.member)],
+          ),
+        );
 
-      expect(find.text('ANIME-000001'), findsNothing);
+        expect(find.text('ANIME-000001'), findsNothing);
 
-      // Le card di classifica, watchlist, duelli e tornei stanno sopra i
-      // controlli del gruppo: senza scorrere il bottante di uscita non e'
-      // costruito e il test passerebbe anche se il testo fosse sparito.
-      await tester.drag(find.byType(ListView), const Offset(0, -400));
-      await tester.pumpAndSettle();
+        // Le card di classifica, watchlist, duelli e tornei stanno sopra i
+        // controlli del gruppo: senza scorrere il bottante di uscita non e'
+        // costruito e il test passerebbe anche se il testo fosse sparito.
+        await tester.drag(find.byType(ListView), const Offset(0, -400));
+        await tester.pumpAndSettle();
 
-      expect(find.text('Esci dal gruppo'), findsOneWidget);
-    });
+        expect(find.text('Esci dal gruppo'), findsOneWidget);
+      },
+    );
   });
 
   group('GroupMember', () {
@@ -440,7 +506,9 @@ test('il nome viene contato senza spazi', () {
     late FakeGroupsRepository repo;
 
     ProviderContainer container() {
-      final c = ProviderContainer(overrides: [groupsRepositoryProvider.overrideWithValue(repo)]);
+      final c = ProviderContainer(
+        overrides: [groupsRepositoryProvider.overrideWithValue(repo)],
+      );
       addTearDown(c.dispose);
       return c;
     }
@@ -479,7 +547,9 @@ test('il nome viene contato senza spazi', () {
 
     test('un errore lascia il ruolo com era', () async {
       repo = FakeGroupsRepository(initial: [buildGroup(role: GroupRole.owner)])
-        ..transferFailure = const GroupsFailure('Solo il owner puo cedere la proprieta\'');
+        ..transferFailure = const GroupsFailure(
+          'Solo il owner puo cedere la proprieta\'',
+        );
       final c = container();
       await c.read(groupsListProvider.future);
 
@@ -496,10 +566,12 @@ test('il nome viene contato senza spazi', () {
     });
 
     test('gli altri gruppi non vengono toccati', () async {
-      repo = FakeGroupsRepository(initial: [
-        buildGroup(id: 'g1', role: GroupRole.owner),
-        buildGroup(id: 'g2', name: 'Stanza uno', role: GroupRole.member),
-      ]);
+      repo = FakeGroupsRepository(
+        initial: [
+          buildGroup(id: 'g1', role: GroupRole.owner),
+          buildGroup(id: 'g2', name: 'Stanza uno', role: GroupRole.member),
+        ],
+      );
       final c = container();
       await c.read(groupsListProvider.future);
 
@@ -518,7 +590,10 @@ test('il nome viene contato senza spazi', () {
       final router = GoRouter(
         initialLocation: '/groups/g1',
         routes: [
-          GoRoute(path: '/groups/g1', builder: (_, _) => const GroupDetailScreen(groupId: 'g1')),
+          GoRoute(
+            path: '/groups/g1',
+            builder: (_, _) => const GroupDetailScreen(groupId: 'g1'),
+          ),
           GoRoute(path: '/groups', builder: (_, _) => const SizedBox.shrink()),
         ],
       );
@@ -538,7 +613,11 @@ test('il nome viene contato senza spazi', () {
       await tester.pumpAndSettle();
     }
 
-    setUp(() => repo = FakeGroupsRepository(initial: [buildGroup(role: GroupRole.owner)]));
+    setUp(
+      () => repo = FakeGroupsRepository(
+        initial: [buildGroup(role: GroupRole.owner)],
+      ),
+    );
 
     testWidgets('scegliere un membro chiede la cessione', (tester) async {
       repo.members = [
@@ -557,6 +636,15 @@ test('il nome viene contato senza spazi', () {
       ];
       await pumpDetail(tester, repo);
 
+      // Il bottone sta in fondo al dettaglio, sotto le card delle sezioni e la
+      // sezione inviti: su uno schermo di prova non entra, quindi va portato in
+      // vista prima di premere.
+      await tester.scrollUntilVisible(
+        find.text('Cedi la proprieta'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+
       await tester.tap(find.text('Cedi la proprieta'));
       await tester.pumpAndSettle();
 
@@ -572,7 +660,9 @@ test('il nome viene contato senza spazi', () {
       expect(repo.transfers, ['g1|u2']);
     });
 
-    testWidgets('un gruppo con un solo membro spiega che non c e nessuno', (tester) async {
+    testWidgets('un gruppo con un solo membro spiega che non c e nessuno', (
+      tester,
+    ) async {
       repo.members = [
         GroupMember(
           userId: 'me',
@@ -583,6 +673,15 @@ test('il nome viene contato senza spazi', () {
       ];
       await pumpDetail(tester, repo);
 
+      // Il bottone sta in fondo al dettaglio, sotto le card delle sezioni e la
+      // sezione inviti: su uno schermo di prova non entra, quindi va portato in
+      // vista prima di premere.
+      await tester.scrollUntilVisible(
+        find.text('Cedi la proprieta'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+
       await tester.tap(find.text('Cedi la proprieta'));
       await tester.pumpAndSettle();
 
@@ -590,9 +689,20 @@ test('il nome viene contato senza spazi', () {
       expect(repo.transferCalls, 0);
     });
 
-    testWidgets('un errore nel caricare i membri offre il retry', (tester) async {
+    testWidgets('un errore nel caricare i membri offre il retry', (
+      tester,
+    ) async {
       repo.membersFailure = const GroupsFailure('Membri non disponibili.');
       await pumpDetail(tester, repo);
+
+      // Il bottone sta in fondo al dettaglio, sotto le card delle sezioni e la
+      // sezione inviti: su uno schermo di prova non entra, quindi va portato in
+      // vista prima di premere.
+      await tester.scrollUntilVisible(
+        find.text('Cedi la proprieta'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
 
       await tester.tap(find.text('Cedi la proprieta'));
       await tester.pumpAndSettle();
@@ -608,6 +718,15 @@ test('il nome viene contato senza spazi', () {
 
     testWidgets('annullare la conferma non cambia nulla', (tester) async {
       await pumpDetail(tester, repo);
+
+      // Il bottone sta in fondo al dettaglio, sotto le card delle sezioni e la
+      // sezione inviti: su uno schermo di prova non entra, quindi va portato in
+      // vista prima di premere.
+      await tester.scrollUntilVisible(
+        find.text('Cedi la proprieta'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
 
       await tester.tap(find.text('Cedi la proprieta'));
       await tester.pumpAndSettle();

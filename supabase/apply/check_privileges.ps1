@@ -80,6 +80,7 @@ foreach ($f in $anonOpen) {
 $clientRpcs = @(
   'group_members_list', 'transfer_group_ownership', 'create_group', 'join_group',
   'leave_group', 'kick_member', 'set_member_role', 'regenerate_invite_code',
+  'create_group_invite', 'list_group_invites', 'revoke_group_invite',
   'group_ranking', 'group_stats', 'my_ranking', 'special_rankings',
   'rating_distribution', 'personal_stats', 'compare_users', 'compare_summary',
   'next_duel_pair', 'duel_elo', 'create_tournament',

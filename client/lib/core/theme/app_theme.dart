@@ -3,9 +3,13 @@ import 'package:flutter/services.dart';
 
 /// Colori di AnimeRank.
 ///
-/// Identita' visiva: base indaco-violaceo molto scuro, accento viola che
-/// sfuma nel magenta. Il contrasto e' voluto e non neutro: la app si
-/// riconosce da lontano nei giochi fra amici.
+/// Identita' visiva: nero AMOLED come base, superfici tonali con appena una
+/// tinta indaco dentro, accento viola. Il nero non e' un grigio scuro travestito:
+/// e' il fondo della app, e su uno schermo OLED spento non consuma quasi nulla.
+///
+/// Il viola non e' decorazione, e' la regola dei contrasti: su nero puro un
+/// viola acceso legge come "premium" e al tempo stesso mantiene il rapporto
+/// di contrasto del testo sopra le superfici tonali.
 ///
 /// Da NON fare: prendere il blu acceso di AniList o il verde di MyAnimeList.
 /// Qui la firma e' la coppia viola/magenta sui gradienti.
@@ -13,14 +17,28 @@ class ArColors {
   const ArColors._();
 
   // Sfondi, dal piu' profondo al piu' vicino al contenuto.
-  static const Color bg = Color(0xFF0A0A12);
-  static const Color surface = Color(0xFF14141F);
-  static const Color surfaceHigh = Color(0xFF1E1E2D);
-  static const Color surfaceTop = Color(0xFF262638);
+  //
+  // La scala segue i cinque livelli tonali di Material 3. Sono volutamente
+  // vicinissimi fra loro, dentro una sfumatura di viola: e' quello che fa
+  // sembrare le card "sollevate" dal fondo senza dover aggiungere un bordo a
+  // ogni elemento. I bordi netti si usano solo dove serve separare due
+  // contenuti affiancati, non per definire ogni superficie.
+  static const Color bg = Color(0xFF05050A);
+  static const Color surface = Color(0xFF0D0D14);
+  static const Color surfaceHigh = Color(0xFF15151F);
+  static const Color surfaceTop = Color(0xFF1F1F2B);
+
+  /// Livelli tonali Material 3, dalla superficie piu' profonda alla piu' in
+  /// alto. Esposti perche' i widget non devono inventarsi colori propri.
+  static const Color containerLowest = Color(0xFF08080E);
+  static const Color containerLow = Color(0xFF0E0E16);
+  static const Color container = Color(0xFF14141D);
+  static const Color containerHigh = Color(0xFF1B1B26);
+  static const Color containerHighest = Color(0xFF232330);
 
   // Accenti.
-  static const Color primary = Color(0xFF7C5CFF);
-  static const Color primaryDim = Color(0xFF5B3FD9);
+  static const Color primary = Color(0xFF8B72FF);
+  static const Color primaryDim = Color(0xFF6A4FE0);
   static const Color accent = Color(0xFFFF4D8D);
   static const Color accentDim = Color(0xFFC7346B);
 
@@ -59,11 +77,31 @@ class ArColors {
     colors: [primary, accent],
   );
 
+  /// Gradiente dei poster: dal trasparente al fondo.
+  ///
+  /// Serve a mettere il titolo del film leggibile sopra un'immagine che non
+  /// controlliamo. Il nero e' quello dello sfondo della app, non un grigio
+  /// neutro: se il fondo cambiasse il gradiente smetterebbe di innestarsi.
+  static const LinearGradient posterScrim = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0x00000000), Color(0xCC05050A), Color(0xFF05050A)],
+    stops: [0.35, 0.72, 1],
+  );
+
+  /// Variante verticale per le intestazioni sopra un'immagine a tutta pagina.
+  static const LinearGradient heroScrim = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0x0005050A), Color(0x9905050A), Color(0xFF05050A)],
+    stops: [0, 0.55, 1],
+  );
+
   /// Variante piu' fredda per sfondi grandi, meno aggressiva del brand.
   static const LinearGradient subtle = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF1A1A2E), Color(0xFF12121C)],
+    colors: [Color(0xFF141426), Color(0xFF0A0A12)],
   );
 
   /// Colore del badge per posizione in classifica.
@@ -73,6 +111,32 @@ class ArColors {
     if (position == 3) return bronze;
     return textLow;
   }
+}
+
+/// Raggio degli angoli.
+///
+/// Centralizzati perche' il raggio e' quello che distingue un'app "moderna" da
+/// un form di amministrazione: qui tutto e' generoso e arrotondato, e i valori
+/// crescono con la dimensione dell'elemento come in un sistema costruito bene.
+/// Un ragolo a caso per ogni schermata e' quello che rende un'app rovinata anche
+/// se i colori sono corretti.
+class ArRadii {
+  const ArRadii._();
+
+  /// Chip, badge, pastiglia piccole.
+  static const double chip = 12;
+
+  /// Pulsanti e campi di testo.
+  static const double control = 16;
+
+  /// Card di contenuto.
+  static const double card = 20;
+
+  /// Sheet che sale dal basso.
+  static const double sheet = 28;
+
+  /// Dialog e menu.
+  static const double dialog = 26;
 }
 
 /// ThemeMode salvato nelle impostazioni dell'utente.
@@ -87,18 +151,27 @@ class AppTheme {
   static ThemeData get dark {
     const scheme = ColorScheme.dark(
       primary: ArColors.primary,
-      onPrimary: Colors.white,
-      primaryContainer: ArColors.primaryDim,
-      onPrimaryContainer: Colors.white,
+      onPrimary: Color(0xFF14091F),
+      primaryContainer: Color(0xFF332468),
+      onPrimaryContainer: Color(0xFFE7E1FF),
       secondary: ArColors.accent,
       onSecondary: Colors.white,
+      secondaryContainer: Color(0xFF6E1B3E),
+      onSecondaryContainer: Color(0xFFFFE0EB),
       tertiary: ArColors.success,
       onTertiary: Color(0xFF04302B),
       error: ArColors.danger,
       onError: Colors.white,
+      // Superfici tonali: l'unico posto dove il nero e' davvero nero e' lo
+      // scaffold. Tutto il resto e' una superficie appena sollevata.
       surface: ArColors.surface,
       onSurface: ArColors.textHigh,
       onSurfaceVariant: ArColors.textMid,
+      surfaceContainerLowest: ArColors.containerLowest,
+      surfaceContainerLow: ArColors.containerLow,
+      surfaceContainer: ArColors.container,
+      surfaceContainerHigh: ArColors.containerHigh,
+      surfaceContainerHighest: ArColors.containerHighest,
       outline: ArColors.border,
       outlineVariant: ArColors.borderSoft,
     );
@@ -118,12 +191,14 @@ class AppTheme {
   /// (un viola acceso su bianco non passa il contrasto AA).
   static ThemeData get light {
     const scheme = ColorScheme.light(
-      primary: Color(0xFF6244E8),
+      primary: Color(0xFF5B3FD9),
       onPrimary: Colors.white,
-      primaryContainer: Color(0xFFE6E0FF),
+      primaryContainer: Color(0xFFE7E1FF),
       onPrimaryContainer: Color(0xFF241468),
       secondary: Color(0xFFD6356F),
       onSecondary: Colors.white,
+      secondaryContainer: Color(0xFFFFE0EB),
+      onSecondaryContainer: Color(0xFF5C0F2B),
       tertiary: Color(0xFF0E9384),
       onTertiary: Colors.white,
       error: Color(0xFFD32F3D),
@@ -131,11 +206,16 @@ class AppTheme {
       surface: Color(0xFFF7F7FB),
       onSurface: Color(0xFF15151E),
       onSurfaceVariant: Color(0xFF56566B),
+      surfaceContainerLowest: Colors.white,
+      surfaceContainerLow: Color(0xFFFCFCFE),
+      surfaceContainer: Color(0xFFF2F2F7),
+      surfaceContainerHigh: Color(0xFFEBEBF1),
+      surfaceContainerHighest: Color(0xFFE3E3EB),
       outline: Color(0xFFD9D9E5),
       outlineVariant: Color(0xFFE8E8F0),
     );
 
-    return _base(scheme, Color(0xFFF2F2F7)).copyWith(
+    return _base(scheme, const Color(0xFFF2F2F7)).copyWith(
       extensions: const [ArExtension(
         reward: Color(0xFFB8860B),
         heroGradient: ArColors.brand,
@@ -176,47 +256,52 @@ class AppTheme {
       ),
 
       cardTheme: CardThemeData(
-        color: scheme.surface,
+        // Superficie tonale, non "riempimento + bordo": il bordo e' la
+        // tecnica delle tabelle, non delle card. Qui il livello di superficie
+        // fa il lavoro da solo e la gerarchia resta leggibile al buio.
+        color: scheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(ArRadii.card),
         ),
       ),
 
       chipTheme: ChipThemeData(
-        backgroundColor: isDark ? ArColors.surfaceHigh : Colors.white,
-        side: BorderSide(color: scheme.outlineVariant),
+        backgroundColor: scheme.surfaceContainerHigh,
+        side: BorderSide.none,
         labelStyle: TextStyle(
           color: scheme.onSurfaceVariant,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ArRadii.chip),
+        ),
       ),
 
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? ArColors.surfaceHigh : Colors.white,
+        fillColor: scheme.surfaceContainerLow,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(ArRadii.control),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(ArRadii.control),
           borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(ArRadii.control),
           borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(ArRadii.control),
           borderSide: BorderSide(color: scheme.error),
         ),
         labelStyle: TextStyle(color: scheme.onSurfaceVariant),
@@ -225,20 +310,22 @@ class AppTheme {
 
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          minimumSize: const Size(0, 50),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(ArRadii.control),
+          ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),
       ),
 
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           side: BorderSide(color: scheme.outline),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(ArRadii.control),
+          ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
       ),
@@ -250,11 +337,18 @@ class AppTheme {
       ),
 
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: isDark ? ArColors.surface : Colors.white,
-        indicatorColor: scheme.primary.withValues(alpha: .18),
+        // Fondo semitrasparente e bordo in alto: la barra "appoggia" sopra il
+        // contenuto invece di essere un blocco piu' chiaro che taglia lo schermo.
+        backgroundColor: isDark
+            ? ArColors.container.withValues(alpha: .92)
+            : Colors.white,
+        indicatorColor: scheme.primary.withValues(alpha: .20),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        height: 68,
+        height: 72,
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ArRadii.control),
+        ),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
@@ -267,11 +361,22 @@ class AppTheme {
                 : scheme.onSurfaceVariant,
           ),
         ),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: 24,
+            color: states.contains(WidgetState.selected)
+                ? scheme.primary
+                : scheme.onSurfaceVariant,
+          ),
+        ),
       ),
 
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: isDark ? ArColors.surface : Colors.white,
-        indicatorColor: scheme.primary.withValues(alpha: .18),
+        backgroundColor: isDark ? ArColors.container : Colors.white,
+        indicatorColor: scheme.primary.withValues(alpha: .20),
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ArRadii.control),
+        ),
         selectedIconTheme: IconThemeData(color: scheme.primary, size: 24),
         unselectedIconTheme:
             IconThemeData(color: scheme.onSurfaceVariant, size: 24),
@@ -295,24 +400,26 @@ class AppTheme {
 
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isDark ? ArColors.surfaceTop : ArColors.surfaceHigh,
+        backgroundColor: isDark ? ArColors.containerHighest : ArColors.surfaceHigh,
         contentTextStyle: TextStyle(color: scheme.onSurface, fontSize: 14),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ArRadii.control),
+        ),
       ),
 
       dialogTheme: DialogThemeData(
-        backgroundColor: isDark ? ArColors.surfaceHigh : Colors.white,
+        backgroundColor: isDark ? ArColors.containerHigh : Colors.white,
         surfaceTintColor: Colors.transparent,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ArRadii.dialog),
+        ),
       ),
 
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: isDark ? ArColors.surfaceHigh : Colors.white,
+        backgroundColor: isDark ? ArColors.containerHigh : Colors.white,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(ArRadii.sheet)),
         ),
       ),
 

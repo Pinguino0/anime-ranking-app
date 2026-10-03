@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/domain/auth_status.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
+import '../../features/anime/presentation/screens/anime_search_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/duels/presentation/screens/duels_screen.dart';
 import '../../features/groups/presentation/screens/create_group_screen.dart';
 import '../../features/groups/presentation/screens/group_detail_screen.dart';
+import '../../features/groups/presentation/screens/group_members_screen.dart';
 import '../../features/groups/presentation/screens/group_picker_screen.dart';
 import '../../features/groups/presentation/screens/groups_list_screen.dart';
 import '../../features/groups/presentation/screens/join_group_screen.dart';
@@ -35,6 +37,13 @@ class AppRoutes {
   static const String groups = '/groups';
   static const String createGroup = '/groups/create';
   static const String joinGroup = '/groups/join';
+
+  /// Ricerca del catalogo anime.
+  ///
+  /// Non sta sotto `/groups` perche' il catalogo e' condiviso: e' leggibile da
+  /// tutti gli autenticati e serve anche a chi non ha ancora un gruppo, per
+  /// capire cosa potrebbe valutare prima di iscriversi a una lista condivisa.
+  static const String animeSearch = '/anime';
 
   /// Selettori di gruppo delle sezioni per gruppo.
   ///
@@ -84,6 +93,13 @@ class AppRoutes {
   /// Costruisce la rotta di un gruppo specifico.
   static String groupDetail(String id) => '/groups/$id';
 
+  /// Costruisce la rotta dell'elenco membri di un gruppo.
+  ///
+  /// I membri hanno una schermata propria e non una sezione nel dettaglio: la
+  /// lista puo' essere lunga, e mescolarla alle card di navigazione del gruppo
+  /// costringerebbe a scorrere tutto per arrivare in fondo ai nomi.
+  static String groupMembers(String id) => '/groups/members/$id';
+
   /// Rotte raggiungibili senza sessione.
   static const Set<String> public = {login, register};
 }
@@ -127,9 +143,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: ':id',
-            builder: (context, state) => GroupDetailScreen(
-              groupId: state.pathParameters['id']!,
-            ),
+            builder: (context, state) =>
+                GroupDetailScreen(groupId: state.pathParameters['id']!),
+          ),
+          // Rotta sorella e non figlia di `:id`: metterla dentro avrebbe
+          // costretto `:id` a dichiarare una child vuota per continuare a
+          // rispondere da solo, e `/groups/members/xyz` si sarebbe potuto
+          // confondere con un id di gruppo.
+          GoRoute(
+            path: 'members/:id',
+            builder: (context, state) =>
+                GroupMembersScreen(groupId: state.pathParameters['id']!),
           ),
         ],
       ),
@@ -141,11 +165,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // cronologia.
       GoRoute(
         path: AppRoutes.rankingPicker,
-        builder: (_, _) => const GroupPickerScreen(section: GroupSection.ranking),
+        builder: (_, _) =>
+            const GroupPickerScreen(section: GroupSection.ranking),
       ),
       GoRoute(
         path: AppRoutes.watchlistPicker,
-        builder: (_, _) => const GroupPickerScreen(section: GroupSection.watchlist),
+        builder: (_, _) =>
+            const GroupPickerScreen(section: GroupSection.watchlist),
       ),
       GoRoute(
         path: AppRoutes.duelsPicker,
@@ -153,7 +179,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.tournamentsPicker,
-        builder: (_, _) => const GroupPickerScreen(section: GroupSection.tournaments),
+        builder: (_, _) =>
+            const GroupPickerScreen(section: GroupSection.tournaments),
       ),
       // La classifica sta su un percorso proprio: dentro `/groups/:id`
       // sostituirebbe il dettaglio del gruppo, che resta la schermata da cui si
@@ -207,6 +234,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // Sotto-gruppo del profilo: le schermate di impostazioni e cancellazione
       // sono raggiungibili solo da un utente collegato, quindi stanno sotto
       // `/profile` che non e' in AppRoutes.public.
+      // Il catalogo e' una sezione di primo livello, non una schermata che si
+      // raggiunge da un gruppo: e' la prima cosa che un utente nuovo cerca,
+      // perche' senza anime votati non c'e' niente da fare in nessuna sezione.
+      GoRoute(
+        path: AppRoutes.animeSearch,
+        builder: (context, state) => const AnimeSearchScreen(),
+      ),
       GoRoute(
         path: AppRoutes.profile,
         builder: (context, state) => const ProfileScreen(),

@@ -50,7 +50,27 @@ abstract interface class GroupsRepository {
   /// Cede la proprieta' del gruppo a un membro. Solo l'owner puo' farlo.
   ///
   /// Chi cede diventa admin e resta nel gruppo.
-  Future<void> transferOwnership({required String groupId, required String newOwnerId});
+  Future<void> transferOwnership({
+    required String groupId,
+    required String newOwnerId,
+  });
+
+  /// Inviti singoli del gruppo, dal piu' recente. Solo admin e owner.
+  ///
+  /// Non tutti i membri possono vederli: un codice invito e una password per
+  /// il gruppo, quindi esporre quelli pendenti a chi e' solo membro aprirebbe
+  /// porte che il gruppo puo' voler tenere chiuse.
+  Future<List<GroupInvite>> listInvites(String groupId);
+
+  /// Crea un invito valido per [daysValid] giorni e restituisce l'invito.
+  ///
+  /// Restituisce l'oggetto invece di solo l'id perche' il codice va mostrato
+  /// subito: un secondo richiesta per rileggerlo potrebbe restituire un
+  /// invito diverso se nel frattempo ne e' stato creato un altro.
+  Future<GroupInvite> createInvite({required String groupId, int? daysValid});
+
+  /// Annulla un invito non ancora usato.
+  Future<void> revokeInvite(String inviteId);
 }
 
 /// Implementazione reale su Supabase.
@@ -90,8 +110,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
       // frattempo.
       final rows = await _client
           .from('groups')
-          .select('id, name, description, image_url, invite_code, owner_id, created_at, '
-              'group_members!inner(role, user_id)')
+          .select(
+            'id, name, description, image_url, invite_code, owner_id, created_at, '
+            'group_members!inner(role, user_id)',
+          )
           .eq('group_members.user_id', _uid);
 
       if (rows.isEmpty) return const [];
@@ -102,7 +124,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
     } on PostgrestException catch (e) {
       throw _translate(e);
     } catch (_) {
-      throw const GroupsFailure('Gruppi non disponibili. Riprova.', isRetryable: true);
+      throw const GroupsFailure(
+        'Gruppi non disponibili. Riprova.',
+        isRetryable: true,
+      );
     }
   }
 
@@ -127,7 +152,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
     } on PostgrestException catch (e) {
       throw _translate(e);
     } catch (_) {
-      throw const GroupsFailure('Gruppo non creato. Riprova.', isRetryable: true);
+      throw const GroupsFailure(
+        'Gruppo non creato. Riprova.',
+        isRetryable: true,
+      );
     }
   }
 
@@ -144,16 +172,19 @@ class SupabaseGroupsRepository implements GroupsRepository {
     } on PostgrestException catch (e) {
       throw _translate(e);
     } catch (_) {
-      throw const GroupsFailure('Ingresso non riuscito. Riprova.', isRetryable: true);
+      throw const GroupsFailure(
+        'Ingresso non riuscito. Riprova.',
+        isRetryable: true,
+      );
     }
   }
 
   @override
   Future<void> leave(String groupId) => _callVoid(
-        'leave_group',
-        params: {'_group_id': groupId},
-        onFailure: 'Uscita non riuscita. Riprova.',
-      );
+    'leave_group',
+    params: {'_group_id': groupId},
+    onFailure: 'Uscita non riuscita. Riprova.',
+  );
 
   @override
   Future<String> regenerateInviteCode(String groupId) async {
@@ -166,7 +197,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
     } on PostgrestException catch (e) {
       throw _translate(e);
     } catch (_) {
-      throw const GroupsFailure('Codice non rigenerato. Riprova.', isRetryable: true);
+      throw const GroupsFailure(
+        'Codice non rigenerato. Riprova.',
+        isRetryable: true,
+      );
     }
   }
 
@@ -175,15 +209,15 @@ class SupabaseGroupsRepository implements GroupsRepository {
     required String groupId,
     required String userId,
     required GroupRole role,
-  }) =>
-      _callVoid(
-        'set_member_role',
-        params: {'_group_id': groupId, '_user_id': userId, '_role': role.name},
-        onFailure: 'Ruolo non cambiato. Riprova.',
-      );
+  }) => _callVoid(
+    'set_member_role',
+    params: {'_group_id': groupId, '_user_id': userId, '_role': role.name},
+    onFailure: 'Ruolo non cambiato. Riprova.',
+  );
 
   @override
-  Future<void> kickMember({required String groupId, required String userId}) => _callVoid(
+  Future<void> kickMember({required String groupId, required String userId}) =>
+      _callVoid(
         'kick_member',
         params: {'_group_id': groupId, '_user_id': userId},
         onFailure: 'Espulsione non riuscita. Riprova.',
@@ -192,7 +226,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
   @override
   Future<List<GroupMember>> listMembers(String groupId) async {
     try {
-      final rows = await _client.rpc('group_members_list', params: {'_group_id': groupId});
+      final rows = await _client.rpc(
+        'group_members_list',
+        params: {'_group_id': groupId},
+      );
 
       if (rows is! List) {
         throw const GroupsFailure('Elenco membri non riconosciuto.');
@@ -203,7 +240,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
       throw _translate(e);
     } catch (e) {
       if (e is GroupsFailure) rethrow;
-      throw const GroupsFailure('Membri non disponibili. Riprova.', isRetryable: true);
+      throw const GroupsFailure(
+        'Membri non disponibili. Riprova.',
+        isRetryable: true,
+      );
     }
   }
 
@@ -211,12 +251,76 @@ class SupabaseGroupsRepository implements GroupsRepository {
   Future<void> transferOwnership({
     required String groupId,
     required String newOwnerId,
-  }) =>
-      _callVoid(
-        'transfer_group_ownership',
-        params: {'_group_id': groupId, '_new_owner_id': newOwnerId},
-        onFailure: 'Proprieta non trasferita. Riprova.',
+  }) => _callVoid(
+    'transfer_group_ownership',
+    params: {'_group_id': groupId, '_new_owner_id': newOwnerId},
+    onFailure: 'Proprieta non trasferita. Riprova.',
+  );
+
+  @override
+  Future<List<GroupInvite>> listInvites(String groupId) async {
+    try {
+      final rows = await _client.rpc(
+        'list_group_invites',
+        params: {'_group_id': groupId},
       );
+
+      if (rows is! List) {
+        throw const GroupsFailure('Elenco inviti non riconosciuto.');
+      }
+
+      return [for (final row in rows) GroupInvite.parse(_asMap(row))];
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } catch (e) {
+      if (e is GroupsFailure) rethrow;
+      throw const GroupsFailure(
+        'Inviti non disponibili. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<GroupInvite> createInvite({
+    required String groupId,
+    int? daysValid,
+  }) async {
+    try {
+      final row = await _client.rpc(
+        'create_group_invite',
+        params: {
+          '_group_id': groupId,
+          // Il backend mette un default di 7 giorni, ma mandarlo esplicitamente
+          // evita che la validazione dipenda dal lato server: se un giorno il
+          // default cambiasse, la UI che chiede 7 giorni continuerebbe a
+          // riceverne un altro senza accorgersene.
+          '_days_valid': daysValid ?? 7,
+        },
+      );
+
+      if (row is! Map) {
+        throw const GroupsFailure('Invito non creato.');
+      }
+
+      return GroupInvite.parse(Map<String, dynamic>.from(row));
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } catch (e) {
+      if (e is GroupsFailure) rethrow;
+      throw const GroupsFailure(
+        'Invito non creato. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<void> revokeInvite(String inviteId) => _callVoid(
+    'revoke_group_invite',
+    params: {'_invite_id': inviteId},
+    onFailure: 'Invito non revocato. Riprova.',
+  );
 
   Map<String, dynamic> _asMap(Object? row) =>
       row is Map ? Map<String, dynamic>.from(row) : const {};
@@ -256,7 +360,8 @@ class SupabaseGroupsRepository implements GroupsRepository {
       inviteCode: json['invite_code'] as String? ?? '',
       ownerId: '${json['owner_id']}',
       myRole: myRole,
-      createdAt: DateTime.tryParse('${json['created_at']}')?.toLocal() ??
+      createdAt:
+          DateTime.tryParse('${json['created_at']}')?.toLocal() ??
           DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
@@ -289,7 +394,10 @@ class SupabaseGroupsRepository implements GroupsRepository {
       return const GroupsFailure('Permessi insufficienti.');
     }
 
-    return const GroupsFailure('Operazione non riuscita. Riprova.', isRetryable: true);
+    return const GroupsFailure(
+      'Operazione non riuscita. Riprova.',
+      isRetryable: true,
+    );
   }
 }
 
@@ -314,7 +422,9 @@ class GroupValidators {
 
   static String? descriptionError(String? value) {
     final v = value?.trim() ?? '';
-    if (v.length > maxDescriptionLength) return 'Massimo $maxDescriptionLength caratteri.';
+    if (v.length > maxDescriptionLength) {
+      return 'Massimo $maxDescriptionLength caratteri.';
+    }
     return null;
   }
 }

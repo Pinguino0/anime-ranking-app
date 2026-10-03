@@ -7,6 +7,8 @@ import 'core/cache/hive_cache_store.dart';
 import 'core/cache/session_cache_cleanup.dart';
 import 'core/env/app_config.dart';
 import 'core/supabase/supabase_provider.dart';
+import 'features/anime/data/anime_repository.dart';
+import 'features/anime/presentation/anime_controller.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/auth/presentation/auth_controller.dart';
 import 'features/duels/data/duels_repository.dart';
@@ -73,18 +75,36 @@ Future<void> main() async {
     ProviderScope(
       overrides: [
         supabaseProvider.overrideWithValue(client),
-        authRepositoryProvider.overrideWithValue(SupabaseAuthRepository(client)),
+        authRepositoryProvider.overrideWithValue(
+          SupabaseAuthRepository(client),
+        ),
         // Il repository gruppi riceve lo stesso client: nessuna nuova
         // connessione, nessuna seconda istanza di Supabase da tenere viva.
-        groupsRepositoryProvider.overrideWithValue(SupabaseGroupsRepository(client)),
-        profileRepositoryProvider.overrideWithValue(SupabaseProfileRepository(client)),
+        groupsRepositoryProvider.overrideWithValue(
+          SupabaseGroupsRepository(client),
+        ),
+        profileRepositoryProvider.overrideWithValue(
+          SupabaseProfileRepository(client),
+        ),
+        // Il catalogo non va in cache: cambia di continuo, e mostrare una
+        // copia vecchia su una ricerca ripeterebbe l'effetto scomodo che la
+        // cache della classifica evita solo perche' li' i dati cambiano poco.
+        animeRepositoryProvider.overrideWithValue(
+          SupabaseAnimeRepository(client),
+        ),
         // Solo la classifica va in cache: e' l'unica schermata che si
         // riapre spesso e che un utente stanco di aspettare accetta di vedere
         // anche copiata, con un avviso che lo dice.
         rankingRepositoryProvider.overrideWithValue(cachedRanking),
-        watchlistRepositoryProvider.overrideWithValue(SupabaseWatchlistRepository(client)),
-        duelsRepositoryProvider.overrideWithValue(SupabaseDuelsRepository(client)),
-        tournamentsRepositoryProvider.overrideWithValue(SupabaseTournamentsRepository(client)),
+        watchlistRepositoryProvider.overrideWithValue(
+          SupabaseWatchlistRepository(client),
+        ),
+        duelsRepositoryProvider.overrideWithValue(
+          SupabaseDuelsRepository(client),
+        ),
+        tournamentsRepositoryProvider.overrideWithValue(
+          SupabaseTournamentsRepository(client),
+        ),
       ],
       child: const AnimeRankApp(),
     ),

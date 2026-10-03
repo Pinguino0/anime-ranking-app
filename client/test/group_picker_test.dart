@@ -1,4 +1,4 @@
-﻿import 'package:animerank/core/error/app_failure.dart';
+import 'package:animerank/core/error/app_failure.dart';
 import 'package:animerank/core/router/app_router.dart';
 import 'package:animerank/features/groups/domain/group.dart';
 import 'package:animerank/features/groups/presentation/screens/group_picker_screen.dart';
@@ -28,10 +28,7 @@ class _Landed extends StatelessWidget {
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(section),
-            Text(groupId),
-          ],
+          children: [Text(section), Text(groupId)],
         ),
       ),
     );
@@ -65,19 +62,23 @@ void main() {
         ),
         GoRoute(
           path: AppRoutes.rankingPicker,
-          builder: (_, _) => const GroupPickerScreen(section: GroupSection.ranking),
+          builder: (_, _) =>
+              const GroupPickerScreen(section: GroupSection.ranking),
         ),
         GoRoute(
           path: AppRoutes.watchlistPicker,
-          builder: (_, _) => const GroupPickerScreen(section: GroupSection.watchlist),
+          builder: (_, _) =>
+              const GroupPickerScreen(section: GroupSection.watchlist),
         ),
         GoRoute(
           path: AppRoutes.duelsPicker,
-          builder: (_, _) => const GroupPickerScreen(section: GroupSection.duels),
+          builder: (_, _) =>
+              const GroupPickerScreen(section: GroupSection.duels),
         ),
         GoRoute(
           path: AppRoutes.tournamentsPicker,
-          builder: (_, _) => const GroupPickerScreen(section: GroupSection.tournaments),
+          builder: (_, _) =>
+              const GroupPickerScreen(section: GroupSection.tournaments),
         ),
         // Destinazioni finte che dichiarano dove si e' finiti: montare le
         // schermate vere richiederebbe anche i loro repository, e un errore di
@@ -90,12 +91,30 @@ void main() {
             name: state.extra as String?,
           ),
         ),
-        GoRoute(path: '/watchlist/:groupId', builder: (_, _) => const SizedBox.shrink()),
-        GoRoute(path: '/duels/:groupId', builder: (_, _) => const SizedBox.shrink()),
-        GoRoute(path: '/tournaments/:groupId', builder: (_, _) => const SizedBox.shrink()),
-        GoRoute(path: AppRoutes.createGroup, builder: (_, _) => const SizedBox.shrink()),
-        GoRoute(path: AppRoutes.joinGroup, builder: (_, _) => const SizedBox.shrink()),
-        GoRoute(path: AppRoutes.groups, builder: (_, _) => const SizedBox.shrink()),
+        GoRoute(
+          path: '/watchlist/:groupId',
+          builder: (_, _) => const SizedBox.shrink(),
+        ),
+        GoRoute(
+          path: '/duels/:groupId',
+          builder: (_, _) => const SizedBox.shrink(),
+        ),
+        GoRoute(
+          path: '/tournaments/:groupId',
+          builder: (_, _) => const SizedBox.shrink(),
+        ),
+        GoRoute(
+          path: AppRoutes.createGroup,
+          builder: (_, _) => const SizedBox.shrink(),
+        ),
+        GoRoute(
+          path: AppRoutes.joinGroup,
+          builder: (_, _) => const SizedBox.shrink(),
+        ),
+        GoRoute(
+          path: AppRoutes.groups,
+          builder: (_, _) => const SizedBox.shrink(),
+        ),
       ],
     );
     addTearDown(router.dispose);
@@ -115,12 +134,7 @@ void main() {
       // rispondere anche per i duelli, o la scelta del gruppo si perderebbe.
       final pickers = GroupSection.values.map((s) => s.pickerRoute).toSet();
       expect(pickers.length, 4);
-      expect(pickers, {
-        '/ranking',
-        '/watchlist',
-        '/duels',
-        '/tournaments',
-      });
+      expect(pickers, {'/ranking', '/watchlist', '/duels', '/tournaments'});
     });
 
     test('il percorso col gruppo e quello senza', () {
@@ -133,10 +147,16 @@ void main() {
 
   group('selettore', () {
     testWidgets('con piu\' gruppi chiede quale aprire', (tester) async {
-      repo = FakeGroupsRepository(initial: [
-        buildGroup(id: 'g1', name: 'Sala pausa'),
-        buildGroup(id: 'g2', name: 'Amici del sabato', description: 'Guardiamo insieme'),
-      ]);
+      repo = FakeGroupsRepository(
+        initial: [
+          buildGroup(id: 'g1', name: 'Sala pausa'),
+          buildGroup(
+            id: 'g2',
+            name: 'Amici del sabato',
+            description: 'Guardiamo insieme',
+          ),
+        ],
+      );
 
       await pumpPicker(tester, GroupSection.ranking);
 
@@ -148,10 +168,12 @@ void main() {
     });
 
     testWidgets('scegliere un gruppo apre quella sezione', (tester) async {
-      repo = FakeGroupsRepository(initial: [
-        buildGroup(id: 'g1', name: 'Sala pausa'),
-        buildGroup(id: 'g2', name: 'Amici del sabato'),
-      ]);
+      repo = FakeGroupsRepository(
+        initial: [
+          buildGroup(id: 'g1', name: 'Sala pausa'),
+          buildGroup(id: 'g2', name: 'Amici del sabato'),
+        ],
+      );
 
       await pumpPicker(tester, GroupSection.ranking);
       await tester.tap(find.text('Sala pausa'));
@@ -166,13 +188,18 @@ void main() {
       // la sezione mostrerebbe un titolo generico e sembrerebbe che il gruppo
       // non sia stato scelto.
       expect(
-        find.descendant(of: find.byType(AppBar), matching: find.text('Sala pausa')),
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Sala pausa'),
+        ),
         findsOneWidget,
       );
     });
 
     testWidgets('con un solo gruppo va diretto alla sezione', (tester) async {
-      repo = FakeGroupsRepository(initial: [buildGroup(id: 'g1', name: 'Sala pausa')]);
+      repo = FakeGroupsRepository(
+        initial: [buildGroup(id: 'g1', name: 'Sala pausa')],
+      );
 
       await pumpPicker(tester, GroupSection.ranking);
 
@@ -186,12 +213,22 @@ void main() {
       await pumpPicker(tester, GroupSection.duels);
 
       expect(find.text('Duelli per gruppo'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Crea un gruppo'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Ho un codice invito'), findsOneWidget);
+      expect(
+        find.widgetWithText(FilledButton, 'Crea un gruppo'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(OutlinedButton, 'Ho un codice invito'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('un errore offre il retry', (tester) async {
-      repo = FakeGroupsRepository()..listFailure = const GroupsFailure('Rete assente.', isRetryable: false);
+      repo = FakeGroupsRepository()
+        ..listFailure = const GroupsFailure(
+          'Rete assente.',
+          isRetryable: false,
+        );
       await pumpPicker(tester, GroupSection.watchlist);
 
       expect(find.textContaining('Rete assente.'), findsOneWidget);
@@ -205,22 +242,33 @@ void main() {
   });
 
   group('shell', () {
-    Future<void> pumpShell(WidgetTester tester, {List<AnimeGroup>? groups}) async {
+    Future<void> pumpShell(
+      WidgetTester tester, {
+      List<AnimeGroup>? groups,
+    }) async {
       final r = FakeGroupsRepository(initial: groups);
 
       final router = GoRouter(
         initialLocation: '/',
         routes: [
           GoRoute(path: '/', builder: (_, _) => const ShellScreen()),
-          GoRoute(path: AppRoutes.groups, builder: (_, _) => const SizedBox.shrink()),
-          GoRoute(path: AppRoutes.profile, builder: (_, _) => const SizedBox.shrink()),
+          GoRoute(
+            path: AppRoutes.groups,
+            builder: (_, _) => const SizedBox.shrink(),
+          ),
+          GoRoute(
+            path: AppRoutes.profile,
+            builder: (_, _) => const SizedBox.shrink(),
+          ),
           GoRoute(
             path: AppRoutes.rankingPicker,
-            builder: (_, _) => const GroupPickerScreen(section: GroupSection.ranking),
+            builder: (_, _) =>
+                const GroupPickerScreen(section: GroupSection.ranking),
           ),
           GoRoute(
             path: AppRoutes.duelsPicker,
-            builder: (_, _) => const GroupPickerScreen(section: GroupSection.duels),
+            builder: (_, _) =>
+                const GroupPickerScreen(section: GroupSection.duels),
           ),
         ],
       );
@@ -247,11 +295,17 @@ void main() {
     testWidgets('le sezioni non sono piu segnaposto', (tester) async {
       await pumpShell(tester);
 
-      // La schermata iniziale elenca le sezioni vere invece di dire che non
-      // esistono: e' il punto da cui si sceglie dove andare.
-      expect(find.text('Scegli da dove partire'), findsOneWidget);
-      expect(find.textContaining('non sono ancora state scritte'), findsNothing);
-      expect(find.textContaining('Ogni sezione appartiene a un gruppo'), findsOneWidget);
+      // Con la nuova shell, se non ci sono gruppi viene mostrato il messaggio
+      // di benvenuto invece della vecchia landing con le sezioni.
+      expect(find.text('Benvenuto'), findsOneWidget);
+      expect(
+        find.textContaining('non sono ancora state scritte'),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('Ogni sezione appartiene a un gruppo'),
+        findsNothing,
+      );
     });
 
     testWidgets('la voce Duelli porta al selettore', (tester) async {
@@ -269,7 +323,10 @@ void main() {
       await tester.tap(find.text('Classifica').first);
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Non fai parte di nessun gruppo'), findsOneWidget);
+      expect(
+        find.textContaining('Non fai parte di nessun gruppo'),
+        findsOneWidget,
+      );
     });
   });
 }

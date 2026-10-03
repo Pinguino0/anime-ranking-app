@@ -38,10 +38,10 @@ enum GroupRole {
   ///
   /// Meglio mostrare il gruppo con permessi minimi che far crashare la lista.
   static GroupRole fromName(String? raw) => switch (raw) {
-        'owner' => GroupRole.owner,
-        'admin' => GroupRole.admin,
-        _ => GroupRole.member,
-      };
+    'owner' => GroupRole.owner,
+    'admin' => GroupRole.admin,
+    _ => GroupRole.member,
+  };
 }
 
 /// Un gruppo di condivisione, visto dal punto di vista dell'utente collegato.
@@ -77,18 +77,23 @@ class AnimeGroup {
   ///
   /// La lista e' stretta e non mostra sempre due righe: quando la descrizione
   /// manca, il ruolo riempie il vuoto invece di lasciare uno spazio vuoto.
-  String get subtitle => description?.isNotEmpty == true ? description! : myRole.label;
+  String get subtitle =>
+      description?.isNotEmpty == true ? description! : myRole.label;
 
-  AnimeGroup copyWith({String? name, String? description, String? inviteCode}) => AnimeGroup(
-        id: id,
-        name: name ?? this.name,
-        description: description ?? this.description,
-        imageUrl: imageUrl,
-        inviteCode: inviteCode ?? this.inviteCode,
-        ownerId: ownerId,
-        myRole: myRole,
-        createdAt: createdAt,
-      );
+  AnimeGroup copyWith({
+    String? name,
+    String? description,
+    String? inviteCode,
+  }) => AnimeGroup(
+    id: id,
+    name: name ?? this.name,
+    description: description ?? this.description,
+    imageUrl: imageUrl,
+    inviteCode: inviteCode ?? this.inviteCode,
+    ownerId: ownerId,
+    myRole: myRole,
+    createdAt: createdAt,
+  );
 
   /// Copia con un owner diverso.
   ///
@@ -96,15 +101,15 @@ class AnimeGroup {
   /// mostrato in schermata: e' la semantica della cessione, e mescolarla ai
   /// campi cosmetici renderebbe facile chiamarla per sbaglio.
   AnimeGroup copyWithOwner(String newOwnerId) => AnimeGroup(
-        id: id,
-        name: name,
-        description: description,
-        imageUrl: imageUrl,
-        inviteCode: inviteCode,
-        ownerId: newOwnerId,
-        myRole: myRole,
-        createdAt: createdAt,
-      );
+    id: id,
+    name: name,
+    description: description,
+    imageUrl: imageUrl,
+    inviteCode: inviteCode,
+    ownerId: newOwnerId,
+    myRole: myRole,
+    createdAt: createdAt,
+  );
 
   /// Costruisce il modello dalla riga restituita da PostgREST.
   ///
@@ -117,7 +122,9 @@ class AnimeGroup {
   factory AnimeGroup.parse(Map<String, dynamic> json) {
     final members = json['group_members'];
     final myRole = switch (members) {
-      final List list when list.isNotEmpty => GroupRole.fromName(list.first['role'] as String?),
+      final List list when list.isNotEmpty => GroupRole.fromName(
+        list.first['role'] as String?,
+      ),
       final Map map => GroupRole.fromName(map['role'] as String?),
       _ => GroupRole.member,
     };
@@ -130,13 +137,116 @@ class AnimeGroup {
       inviteCode: json['invite_code'] as String? ?? '',
       ownerId: '${json['owner_id']}',
       myRole: myRole,
-      createdAt: DateTime.tryParse('${json['created_at']}')?.toLocal() ??
+      createdAt:
+          DateTime.tryParse('${json['created_at']}')?.toLocal() ??
           DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 
   @override
   bool operator ==(Object other) => other is AnimeGroup && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+/// Un invito a entrare in un gruppo, con scadenza e uso tracciati.
+///
+/// Diversamente dal codice del gruppo, che vale per sempre e si rigenera
+/// invalidando il precedente, l'invito singolo vale per uno solo ingresso e per
+/// un tempo limitato.
+class GroupInvite {
+  const GroupInvite({
+    required this.id,
+    required this.code,
+    required this.createdBy,
+    required this.expiresAt,
+    required this.createdAt,
+    this.usedBy,
+    this.usedAt,
+    this.revokedAt,
+    this.pending,
+  });
+
+  final String id;
+  final String code;
+  final String createdBy;
+  final DateTime expiresAt;
+  final DateTime createdAt;
+
+  /// Chi ha usato l'invito, se qualcuno l'ha usato.
+  final String? usedBy;
+  final DateTime? usedAt;
+  final DateTime? revokedAt;
+
+  /// true se l'invito si puo' ancora usare, false se e' finito, null se e'
+  /// scaduto da piu' di una settimana e il backend non sa piu' nulla.
+  ///
+  /// Il terzo stato esiste perche' il backend smette di riportare gli inviti
+  /// vecchi: senza un caso per "non lo so", la lista mostrerebbe come
+  /// revocati degli inviti semplicemente spariti.
+  final bool? pending;
+
+  /// true se l'invito e' ancora spendibile.
+  ///
+  /// [pending] null vale come false: senza questo la UI offrirebbe di copiare
+  /// un codice che il backend non accetterebbe piu'.
+  bool get isActive => pending == true;
+
+  /// true se l'invito e' stato annullato prima di essere usato.
+  bool get isRevoked => revokedAt != null;
+
+  /// true se l'invito e' scaduto senza essere stato usato.
+  bool get isExpired => pending == false && usedAt == null && revokedAt == null;
+
+  /// Stato mostrato all'utente.
+  String get statusLabel {
+    if (usedAt != null) return 'Usato';
+    if (revokedAt != null) return 'Revocato';
+    if (pending == false) return 'Scaduto';
+    if (pending == null) return 'Non piu\' valido';
+    return 'Valido fino al ${_day(expiresAt)}';
+  }
+
+  /// Data in formato breve, senza l'anno quando non serve.
+  String _day(DateTime when) {
+    final local = when.toLocal();
+    final now = DateTime.now();
+    return local.year == now.year
+        ? '${local.day}/${local.month}'
+        : '${local.day}/${local.month}/${local.year}';
+  }
+
+  factory GroupInvite.parse(Map<String, dynamic> json) => GroupInvite(
+    id: '${json['id']}',
+    code: json['code'] as String? ?? '',
+    createdBy: '${json['created_by']}',
+    usedBy: json['used_by'] as String?,
+    usedAt: _date(json['used_at']),
+    revokedAt: _date(json['revoked_at']),
+    expiresAt:
+        _date(json['expires_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+    createdAt:
+        _date(json['created_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+    // `pending` arriva come bool dal backend, ma una risposta senza il
+    // campo non deve diventare "valido": il default e' null, che la UI
+    // tratta come non valido.
+    pending: json['pending'] as bool?,
+  );
+
+  /// Legge una data tollerante.
+  ///
+  /// Le date del backend sono timestamptz in ISO 8601. Una riga senza la data
+  /// non deve far cadere tutta la lista, quindi si ripiega sull'epoca: il
+  /// fallback e' inaccettabile per l'utente ma preferibile a un crash, e la
+  /// schermata mostra la data per intero cosi' l'errore resta evidente.
+  static DateTime? _date(Object? raw) {
+    if (raw == null) return null;
+    return DateTime.tryParse('$raw')?.toLocal();
+  }
+
+  @override
+  bool operator ==(Object other) => other is GroupInvite && other.id == id;
 
   @override
   int get hashCode => id.hashCode;
@@ -174,16 +284,18 @@ class GroupMember {
   String get label => username.isEmpty ? userId : username;
 
   factory GroupMember.parse(Map<String, dynamic> json) => GroupMember(
-        userId: '${json['user_id']}',
-        username: json['username'] as String? ?? '',
-        avatarUrl: json['avatar_url'] as String?,
-        role: GroupRole.fromName(json['role'] as String?),
-        joinedAt: DateTime.tryParse('${json['joined_at']}')?.toLocal() ??
-            DateTime.fromMillisecondsSinceEpoch(0),
-      );
+    userId: '${json['user_id']}',
+    username: json['username'] as String? ?? '',
+    avatarUrl: json['avatar_url'] as String?,
+    role: GroupRole.fromName(json['role'] as String?),
+    joinedAt:
+        DateTime.tryParse('${json['joined_at']}')?.toLocal() ??
+        DateTime.fromMillisecondsSinceEpoch(0),
+  );
 
   @override
-  bool operator ==(Object other) => other is GroupMember && other.userId == userId;
+  bool operator ==(Object other) =>
+      other is GroupMember && other.userId == userId;
 
   @override
   int get hashCode => userId.hashCode;
