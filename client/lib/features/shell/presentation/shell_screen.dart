@@ -4,9 +4,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/breakpoints.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/ui/transitions.dart';
 import '../../auth/presentation/auth_controller.dart';
 import '../../groups/presentation/groups_controller.dart';
 import '../../home/screens/home_screen.dart';
+import 'widgets/shell_chrome.dart';
 
 /// Scheletro dell'app per l'utente collegato.
 ///
@@ -150,12 +153,11 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       return Scaffold(
         body: Row(
           children: [
-            _Sidebar(
-              sections: _sections,
-              selected: selected,
+            ArNavRail(
+              destinations: _destinationsOf(_sections),
+              selectedIndex: selected,
               onSelect: (i) => _select(i, sidebar: true),
             ),
-            const VerticalDivider(width: 1),
             Expanded(child: body),
           ],
         ),
@@ -169,22 +171,34 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
 
     return Scaffold(
       body: body,
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: ArBottomBar(
         selectedIndex: mobileIndex,
-        onDestinationSelected: (i) => _select(i, sidebar: false),
+        onSelect: (i) => _select(i, sidebar: false),
         destinations: [
           // La quinta sezione non c'e' nella barra, quindi il profilo viene
           // aggiunto a mano: altrimenti la barra mostrerebbe quattro voci e
-          // il proflio sparirebbe dal telefono, che e' dove serve di piu'.
-          for (final s in _sections.take(_mobileSectionCount))
-            NavigationDestination(icon: Icon(s.icon), label: s.label),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline),
+          // il profilo sparirebbe dal telefono, che e' dove serve di piu'.
+          ..._destinationsOf(_sections.take(_mobileSectionCount).toList()),
+          const ArDestination(
             label: 'Profilo',
+            icon: Icons.person_outline,
+            selectedIcon: Icons.person,
           ),
         ],
       ),
     );
+  }
+
+  /// Le sezioni nella forma che la barra o la colonna laterale capiscono.
+  ///
+  /// La conversione sta qui e non nei due widget: se ognuno ricavasse le
+  /// icone dai propri campi, la barra laterale e quella in basso potrebbero
+  /// finire con icone diverse per la stessa sezione.
+  static List<ArDestination> _destinationsOf(List<_NavSection> sections) {
+    return [
+      for (final s in sections)
+        ArDestination(label: s.label, icon: s.icon, selectedIcon: s.selectedIcon),
+    ];
   }
 }
 
@@ -211,46 +225,6 @@ int _indexOfRoute(List<_NavSection> sections, String? route) {
   if (route == null) return 0;
   final index = sections.indexWhere((s) => s.route == route);
   return index < 0 ? 0 : index;
-}
-
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.sections,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  final List<_NavSection> sections;
-  final int selected;
-  final ValueChanged<int> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return NavigationRail(
-      selectedIndex: selected,
-      labelType: NavigationRailLabelType.all,
-      onDestinationSelected: onSelect,
-      leading: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Text(
-          'AnimeRank',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      destinations: [
-        for (final s in sections)
-          NavigationRailDestination(
-            icon: Icon(s.icon),
-            selectedIcon: Icon(s.selectedIcon),
-            label: Text(s.label),
-          ),
-      ],
-    );
-  }
 }
 
 /// Contenuto centrale.
@@ -301,17 +275,26 @@ class _HintCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(ArSpace.md),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
+        color: ArColors.containerLow,
+        borderRadius: BorderRadius.circular(ArRadii.card),
+        border: Border.all(color: ArColors.borderSoft),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
-          const SizedBox(width: 12),
-          Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
+          Icon(icon, size: 20, color: ArColors.primary),
+          const SizedBox(width: ArSpace.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: ArColors.textMid,
+                height: 1.45,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -332,35 +315,52 @@ class _FirstRunWelcome extends StatelessWidget {
 
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
+        constraints: const BoxConstraints(maxWidth: 480),
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(ArSpace.lg),
           children: [
-            Text('Accesso effettuato', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text('Benvenuto', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 6),
-            Text(
-              "Voti, watchlist, Elo e tornei sono calcolati dentro un gruppo. "
-              "Creane uno e invita chi ti pare: le classifiche sono per gruppo, "
-              "non globali.",
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            // Il segno al posto del titolo: dice il nome dell'app dove la si
+            // cerca, e stavolta non e' una riga di testo che compete con
+            // "Benvenuto" per la stessa importanza.
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: BrandMark(size: 26),
+            ),
+            const SizedBox(height: ArSpace.md),
+            Text('Benvenuto', style: theme.textTheme.headlineMedium),
+            const SizedBox(height: ArSpace.xs),
+            ConstrainedBox(
+              // La riga non oltrepassa una certa larghezza: a tutta pagina su un
+              // monitor grande il testo arriva a 120 caratteri per riga e
+              // l'occhio perde il punto di fine frasea.
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Text(
+                'Voti, watchlist, Elo e tornei si calcolano dentro un gruppo. '
+                'Creane uno e invita chi ti pare: le classifiche sono per '
+                'gruppo, non globali.',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: ArColors.textMid,
+                  height: 1.5,
+                ),
               ),
             ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
+            const SizedBox(height: ArSpace.xl),
+            ArGradientButton(
+              label: 'Crea un gruppo',
+              icon: Icons.group_add_outlined,
+              expand: true,
               onPressed: () => context.push(AppRoutes.createGroup),
-              icon: const Icon(Icons.group_add_outlined),
-              label: const Text('Crea un gruppo'),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: ArSpace.sm),
             OutlinedButton.icon(
               onPressed: () => context.push(AppRoutes.joinGroup),
-              icon: const Icon(Icons.login),
+              icon: const Icon(Icons.login, size: 19),
               label: const Text('Unisciti con un codice'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: ArSpace.xl),
             const _HintCard(
               icon: Icons.search,
               text: 'Nel frattempo puoi cercare anime: quello che trovi viene '
