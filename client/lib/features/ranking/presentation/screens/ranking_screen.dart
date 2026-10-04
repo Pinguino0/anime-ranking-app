@@ -1,3 +1,5 @@
+import '../../../../core/ui/anime_thumb.dart';
+import '../../../../core/ui/content_row.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,7 +9,6 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../../anime/domain/anime.dart';
-import '../../../auth/presentation/widgets/auth_scaffold.dart';
 import '../../domain/ranking.dart';
 import '../ranking_controller.dart';
 import '../widgets/rank_podium.dart';
@@ -263,9 +264,9 @@ class _StandardTab extends ConsumerWidget {
     final ranking = ref.watch(rankingProvider(groupId));
 
     return ranking.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => _ErrorState(
-        message: '$error',
+      loading: () => const _RankingSkeleton(),
+      error: (error, _) => ErrorState(
+        message: _errorText(error),
         onRetry: () => ref.read(rankingProvider(groupId).notifier).refresh(),
       ),
       data: (rows) {
@@ -531,9 +532,9 @@ class _SpecialTab extends ConsumerWidget {
         ),
         Expanded(
           child: entries.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => _ErrorState(
-              message: '$error',
+            loading: () => const _RankingSkeleton(rows: 5),
+            error: (error, _) => ErrorState(
+              message: _errorText(error),
               onRetry: () => ref.read(specialRankingProvider((groupId, kind)).notifier).refresh(),
             ),
             data: (rows) {
@@ -646,6 +647,66 @@ PodiumEntry _podiumOf(BuildContext context, RankingEntry entry) {
     heroTag: anime.heroTag,
     onTap: () => context.push(AppRoutes.animeDetail, extra: anime),
   );
+}
+
+/// Frase da mostrare quando una richiesta della classifica fallisce.
+///
+/// Il provider puo' buttare o una [RankingFailure] — che porta gia' la frase
+/// scritta per l'utente — o un errore grezzo, perche' un canale auth rotto o
+/// un timeout passano dal `.when` senza essere passati dalla traduzione. La
+/// schermata non deve stampare il secondo: "Exception: TimeoutException after
+/// 0:00:05" non dice all'utente cosa fare, e il prompt chiede esplicitamente
+/// che gli errori tecnici non arrivino mai a schermo.
+String _errorText(Object error) => switch (error) {
+      final RankingFailure failure => failure.message,
+      // `toString` e non il tipo: almeno il nome della classe resta e un utente
+      // che la riporta puo' far capire da dove viene il problema.
+      _ => 'Non e stato possibile caricare la classifica.',
+    };
+
+/// Scheletro della classifica mentre le righe arrivano.
+///
+/// Non uno spinner centrato: la classifica e' una lista di schede alte e larghe,
+/// e uno scheletro della stessa forma dice da subito che cosa sta arrivando e
+/// cosa ci sara' al suo posto. Sotto almeno dodici righe lo scheletro e' un
+/// blocco che trabocca, quindi se ne disegnano sei: abbastanza da far leggere il
+/// ritmo della pagina senza fingere un elenco che non esiste.
+class _RankingSkeleton extends StatelessWidget {
+  const _RankingSkeleton({this.rows = 6});
+
+  final int rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(ArSpace.md, ArSpace.sm, ArSpace.md, ArSpace.lg),
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: rows,
+      separatorBuilder: (_, _) => const SizedBox(height: ArSpace.xs),
+      itemBuilder: (_, _) => const Padding(
+        padding: EdgeInsets.all(ArSpace.sm),
+        child: Row(
+          children: [
+            SkeletonBox(width: 52, height: 52, radius: ArRadii.chip),
+            SizedBox(width: ArSpace.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SkeletonBox(width: 180, height: 15),
+                  SizedBox(height: ArSpace.xs),
+                  SkeletonBox(width: 110, height: 12),
+                ],
+              ),
+            ),
+            SizedBox(width: ArSpace.sm),
+            SkeletonBox(width: 44, height: 26),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Scheda anime ricostruita da una riga di classifica.
@@ -1192,65 +1253,6 @@ class _AnimeCell extends StatelessWidget {
   }
 }
 
-/// Copertina dell'anime con fallback sull'iniziale.
-class AnimeThumb extends StatelessWidget {
-  const AnimeThumb({
-    this.url,
-    required this.title,
-    this.size = 40,
-    this.radius = 8,
-    super.key,
-  });
-
-  final String? url;
-  final String title;
-  final double size;
-
-  /// Angoli della copertina.
-  ///
-  /// Parametro e non costante perche' la stessa copertina compare a due
-  /// scale: arrotondata forte nella card, dove e' piccola e gli angoli vivi
-  /// sembrerebbero un taglio, e quasi piatta nella tabella, dove la griglia
-  /// chiede celle che si allineino.
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    final fallback = ColoredBox(
-      color: ArColors.containerHighest,
-      child: Center(
-        child: Text(
-          title.trim().isEmpty ? '?' : title.trim()[0].toUpperCase(),
-          style: theme.textTheme.titleSmall?.copyWith(
-            color: ArColors.textMid,
-            fontVariations: const [FontVariation('wght', 700)],
-          ),
-        ),
-      ),
-    );
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: (url == null || url!.isEmpty)
-            ? fallback
-            : Image.network(
-                url!,
-                fit: BoxFit.cover,
-                // Senza gestione dell'errore, un URL rotto mostrerebbe il
-                // riquadro grigio di Image.network senza dire nulla: peggio
-                // del fallback, che almeno mostra di che anime si tratta.
-                errorBuilder: (_, _, _) => fallback,
-              ),
-      ),
-    );
-  }
-}
-
 /// Pulsante per votare.
 ///
 /// Mostra il voto gia' dato e apre il selettore al tocco. Il voto non si
@@ -1509,29 +1511,3 @@ class _OfflineBanner extends ConsumerWidget {
   }
 }
 
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, required this.onRetry});
-
-  final String message;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AuthErrorBanner.error(message),
-              const SizedBox(height: 16),
-              FilledButton.tonal(onPressed: onRetry, child: const Text('Riprova')),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

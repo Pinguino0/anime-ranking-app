@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:animerank/core/constants/breakpoints.dart';
 import 'package:animerank/core/router/app_router.dart';
+import 'package:animerank/core/theme/app_theme.dart';
+import 'package:animerank/core/ui/anime_card.dart';
+import 'package:animerank/core/ui/content_row.dart';
+import 'package:animerank/core/ui/section_header.dart';
 import 'package:animerank/features/anime/data/anime_repository.dart';
 import 'package:animerank/features/anime/domain/anime.dart';
 import 'package:animerank/features/anime/presentation/anime_controller.dart';
@@ -23,6 +27,11 @@ import 'package:go_router/go_router.dart';
 /// La schermata non chiede mai piu' di una pagina per volta e accumula i
 /// risultati: portare tutto il catalogo sul telefono costerebbe piu' di quanto
 /// vale, e l'utente legge le prime righe.
+///
+/// I risultati sono una griglia di locandine e non una tabella. Il motivo e'
+/// che qui si cerca un'immagine da ricordare, non una riga da confrontare: e
+/// su schermo largo una griglia mostra molti piu' titoli per schermo, quindi
+/// l'utente trova quello che cerca con meno scorrimenti.
 class AnimeSearchScreen extends ConsumerStatefulWidget {
   const AnimeSearchScreen({super.key});
 
@@ -85,7 +94,7 @@ class _AnimeSearchScreenState extends ConsumerState<AnimeSearchScreen> {
     _debounceTimer = Timer(_debounce, () {
       if (!mounted) return;
       ref.read(animeSearchProvider.notifier).search(value);
-      // Ogni ricerca riparte dall alto: continuare a scorrere mentre il testo
+      // Ogni ricerca riparte dall'alto: continuare a scorrere mentre il testo
       // cambia mostrerebbe risultati a meta' lista, che non esistono.
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(0);
@@ -106,34 +115,20 @@ class _AnimeSearchScreenState extends ConsumerState<AnimeSearchScreen> {
     final controller = ref.watch(animeSearchProvider.notifier);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Anime'),
-        actions: [
-          IconButton(
-            tooltip: 'Aggiorna',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
-          ),
-        ],
-      ),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
-            _SearchField(
+            _Top(
               controller: _textController,
               onChanged: _onQueryChanged,
-              filterCount: controller.filters.activeCount,
-              filtersOpen: ref.watch(animeFiltersPanelProvider),
-              onToggleFilters: controller.toggleFiltersPanel,
-              onClearFilters: controller.clearFilters,
+              onRefresh: _refresh,
             ),
-            _RecentStrip(),
-            if (filtersOpen)
-              _FilterPanel(
-                filters: controller.filters,
-                onApply: controller.applyFilters,
-                onToggleGenre: controller.toggleGenre,
-              ),
+            _Filters(
+              controller: controller,
+              open: filtersOpen,
+            ),
+            const _RecentStrip(),
             Expanded(
               child: _buildBody(context, results, pagination, controller),
             ),
@@ -167,14 +162,14 @@ class _AnimeSearchScreenState extends ConsumerState<AnimeSearchScreen> {
     }
 
     return results.when(
-      loading: () => const _LoadingList(),
+      loading: () => const _LoadingGrid(),
       error: (error, _) => _ErrorView(message: '$error', onRetry: _refresh),
       data: (rows) {
         if (rows.isEmpty) {
           return _EmptyResults(controller: controller, pagination: pagination);
         }
 
-        return _ResultsList(
+        return _ResultsGrid(
           rows: rows,
           pagination: pagination,
           controller: controller,
@@ -188,73 +183,342 @@ class _AnimeSearchScreenState extends ConsumerState<AnimeSearchScreen> {
   }
 }
 
-/// Campo di ricerca con pulsante filtri.
-class _SearchField extends StatelessWidget {
-  const _SearchField({
+/// Intestazione con campo di ricerca e refresh.
+///
+/// Il campo e' l'elemento piu' grande della schermata perche' e' l'unica azione
+/// che l'utente ha sulla pagina: metterlo alla stessa altezza di un'icona
+/// significherebbe costringerlo a cercare il campo fra tre controlli uguali.
+class _Top extends StatelessWidget {
+  const _Top({
     required this.controller,
     required this.onChanged,
-    required this.filterCount,
-    required this.filtersOpen,
-    required this.onToggleFilters,
-    required this.onClearFilters,
+    required this.onRefresh,
   });
 
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
-
-  final int filterCount;
-  final bool filtersOpen;
-  final VoidCallback onToggleFilters;
-  final VoidCallback onClearFilters;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final horizontal = ArSpace.page(context).left;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: EdgeInsets.fromLTRB(horizontal, ArSpace.sm, horizontal, ArSpace.xs),
       child: Row(
         children: [
           Expanded(
-            child: SearchBar(
+            child: TextField(
               controller: controller,
-              hintText: 'Cerca anime',
-              // Il focus automatico mette la tastiera subito: l utente che ha
+              style: theme.textTheme.titleMedium,
+              // Il focus automatico mette la tastiera subito: l'utente che ha
               // scelto "Cerca anime" dalla home vuole scrivere, non toccare
               // prima il campo per poterlo toccare dopo.
-              autoFocus: true,
-              leading: const Icon(Icons.search),
-              // La X azzera il campo e rilancia la ricerca: senza, il testo
-              // resterebbe e la lista continuerebbe a mostrare i risultati
-              // precedenti, che non piu' corrispondono a quello che si vede.
-              trailing: [
-                if (controller.text.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Cancella',
-                    icon: const Icon(Icons.close),
-                    onPressed: () {
-                      controller.clear();
-                      onChanged('');
-                    },
-                  ),
-              ],
+              autofocus: true,
+              textInputAction: TextInputAction.search,
               onChanged: onChanged,
               // Invio fa la ricerca subito: rimandare di 350ms su un tocco
               // esplicito sembrerebbe che l'app abbia ignorato la richiesta.
               onSubmitted: onChanged,
+              decoration: InputDecoration(
+                hintText: 'Cerca anime',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                // La X azzera il campo e rilancia la ricerca: senza, il testo
+                // resterebbe e la lista continuerebbe a mostrare i risultati
+                // precedenti, che non piu' corrispondono a quello che si vede.
+                suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: controller,
+                  builder: (context, value, _) => value.text.isEmpty
+                      ? const SizedBox.shrink()
+                      : IconButton(
+                          tooltip: 'Cancella',
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () {
+                            controller.clear();
+                            onChanged('');
+                          },
+                        ),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          // Badge sui filtri attivi: senza, l'utente non ha modo di capire
-          // perche' la lista e' piu' corta di quanto si aspettava.
-          Badge(
-            isLabelVisible: filterCount > 0,
-            label: Text('$filterCount'),
-            child: IconButton.filledTonal(
-              tooltip: 'Filtri',
-              icon: const Icon(Icons.tune),
-              onPressed: onToggleFilters,
-            ),
+          const SizedBox(width: ArSpace.xs),
+          IconButton(
+            tooltip: 'Aggiorna',
+            icon: const Icon(Icons.refresh),
+            onPressed: onRefresh,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Barra dei filtri.
+///
+/// Stessa forma su schermo largo e stretto, e cambia solo il posto in cui si
+/// apre: su telefono il pannello e' un foglio sopra la lista, su desktop scende
+/// sotto la barra. Un foglio anche da desktop coprirebbe i risultati che
+/// l'utente sta confrontando con i filtri, che e' esattamente il momento in cui
+/// deve poterli vedere cambiare.
+class _Filters extends ConsumerWidget {
+  const _Filters({required this.controller, required this.open});
+
+  final AnimeSearchController controller;
+  final bool open;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final horizontal = ArSpace.page(context).left;
+    final count = controller.filters.activeCount;
+
+    final body = _FilterPanel(
+      filters: controller.filters,
+      onApply: controller.applyFilters,
+      onToggleGenre: controller.toggleGenre,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: horizontal),
+          child: Row(
+            children: [
+              // Badge sui filtri attivi: senza, l'utente non ha modo di capire
+              // perche' la lista e' piu' corta di quanto si aspettava.
+              ArChip(
+                label: count > 0 ? 'Filtri · $count' : 'Filtri',
+                icon: Icons.tune,
+                selected: count > 0 || open,
+                onTap: controller.toggleFiltersPanel,
+              ),
+              if (count > 0) ...[
+                const SizedBox(width: ArSpace.xs),
+                // Azzerare e' una delle azioni piu' frequenti dopo una ricerca
+                // delusa: dover chiudere il pannello e azzerare le pastiglie una
+                // a una e' il modo piu' rapido per far smettere di usare i filtri.
+                ArChip(
+                  label: 'Azzera',
+                  icon: Icons.close,
+                  selected: false,
+                  onTap: controller.clearFilters,
+                ),
+              ],
+              ],
+          ),
+        ),
+        if (open) body,
+      ],
+    );
+  }
+}
+
+/// Pannello dei filtri.
+class _FilterPanel extends ConsumerWidget {
+  const _FilterPanel({
+    required this.filters,
+    required this.onApply,
+    required this.onToggleGenre,
+  });
+
+  final AnimeFilters filters;
+  final ValueChanged<AnimeFilters> onApply;
+  final ValueChanged<String> onToggleGenre;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final genres = ref.watch(animeGenresProvider);
+    final horizontal = ArSpace.page(context).left;
+
+    return Container(
+      // Senza il contenitore con bordo il pannello si confonderebbe con lo
+      // sfondo della lista: l'utente non capirebbe che e' una sezione che si
+      // chiude.
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        border: Border(
+          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(0, 14, 0, 18),
+      // Il pannello scorre e non occupa piu' di meta' schermo: con cinque
+      // gruppi di filtri su un telefono prenderebbe piu' spazio dei risultati,
+      // e i risultati sono la ragione per cui l'utente ha aperto la
+      // schermata. Il tetto serve perche' il pannello sta in una Column con la
+      // lista: senza, cresce fino a uscire dal viewport e i filtri in fondo
+      // diventano irraggiungibili.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.45,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: horizontal),
+                child: SectionHeader(
+                  title: 'Filtri',
+                  action: filters.activeCount == 0
+                      ? null
+                      : () => onApply(const AnimeFilters()),
+                  actionLabel: 'Azzera',
+                ),
+              ),
+              const SizedBox(height: ArSpace.sm),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: horizontal),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: ArSpace.xs,
+                      runSpacing: ArSpace.xs,
+                      children: [
+                        for (final type in AnimeMediaType.values)
+                          ArChip(
+                            label: type.label,
+                            selected: filters.mediaType == type,
+                            onTap: () => onApply(
+                              filters.mediaType == type
+                                  ? filters.copyWith(clearMediaType: true)
+                                  : filters.copyWith(mediaType: type),
+                            ),
+                          ),
+                        for (final season in AnimeSeason.values)
+                          ArChip(
+                            label: season.label,
+                            selected: filters.season == season,
+                            onTap: () => onApply(
+                              filters.season == season
+                                  ? filters.copyWith(clearSeason: true)
+                                  : filters.copyWith(season: season),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: ArSpace.md),
+                    Text('Stato', style: theme.textTheme.labelSmall),
+                    const SizedBox(height: 6),
+                    // "Solo gli anime in corso" e' la domanda piu' frequente
+                    // dopo "cerca un titolo": chi apre l'app vuole sapere cosa
+                    // guardare adesso.
+                    Wrap(
+                      spacing: ArSpace.xs,
+                      runSpacing: ArSpace.xs,
+                      children: [
+                        for (final status in AnimeAirStatus.values)
+                          ArChip(
+                            label: status.label,
+                            selected: filters.status == status,
+                            onTap: () => onApply(
+                              filters.status == status
+                                  ? filters.copyWith(clearStatus: true)
+                                  : filters.copyWith(status: status),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: ArSpace.md),
+                    Text('Genere', style: theme.textTheme.labelSmall),
+                    const SizedBox(height: 6),
+                    genres.when(
+                      data: (rows) => Wrap(
+                        spacing: ArSpace.xs,
+                        runSpacing: ArSpace.xs,
+                        // I generi sono tanti: senza un limite allo scroll il
+                        // pannello occuperebbe piu' schermo della lista e
+                        // coprirebbe i risultati della ricerca appena fatta.
+                        children: [
+                          for (final genre in rows.take(24))
+                            ArChip(
+                              label: genre.name,
+                              selected: filters.genres.contains(genre.name),
+                              onTap: () => onToggleGenre(genre.name),
+                            ),
+                        ],
+                      ),
+                      loading: () => const SizedBox(
+                        height: 34,
+                        width: 34,
+                        child: Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                      // I generi non disponibili non devono bloccare i filtri
+                      // che funzionano: formato, stagione e voto restano
+                      // utilizzabili.
+                      error: (error, _) => Text(
+                        'Generi non disponibili.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: ArSpace.md),
+                    Text('Voto minimo', style: theme.textTheme.labelSmall),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: ArSpace.xs,
+                      children: [
+                        for (final score in const [6.0, 7.0, 8.0, 9.0])
+                          ArChip(
+                            // Il separatore e' "8+": il segno "minimo" scritto
+                            // per esteso occuperebbe spazio nella pastiglia
+                            // senza aggiungere informazione.
+                            label: '${score.toInt()}+',
+                            selected: filters.minScore == score,
+                            onTap: () => onApply(
+                              filters.minScore == score
+                                  ? filters.copyWith(clearScore: true)
+                                  : filters.copyWith(minScore: score),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: ArSpace.md),
+                    Text('Anno', style: theme.textTheme.labelSmall),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: ArSpace.xs,
+                      children: [
+                        for (final year in const [
+                          2026,
+                          2025,
+                          2024,
+                          2020,
+                          2010,
+                          2000,
+                          1990,
+                        ])
+                          ArChip(
+                            label: '${year}s',
+                            selected: filters.yearFrom == year,
+                            onTap: () => onApply(
+                              filters.yearFrom == year
+                                  ? filters.copyWith(clearYear: true)
+                                  : filters.copyWith(yearFrom: year),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -284,29 +548,47 @@ class _RecentStripState extends ConsumerState<_RecentStrip> {
     }
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ListTile(
-          dense: true,
-          leading: const Icon(Icons.new_releases_outlined),
-          title: const Text('Usciti di recente'),
-          trailing: Icon(_open ? Icons.expand_less : Icons.expand_more),
+        InkWell(
           onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: ArSpace.page(context).left,
+              vertical: ArSpace.sm,
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.new_releases_outlined, size: 18),
+                const SizedBox(width: ArSpace.xs),
+                Text('Usciti di recente',
+                    style: Theme.of(context).textTheme.titleSmall),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: _open ? 0.5 : 0,
+                  duration: ArMotion.base,
+                  child: const Icon(Icons.expand_more, size: 20),
+                ),
+              ],
+            ),
+          ),
         ),
         if (_open)
           recent.when(
             data: (rows) => SizedBox(
-              height: 150,
+              height: 196,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(
+                    horizontal: ArSpace.page(context).left),
                 itemCount: rows.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
+                separatorBuilder: (_, _) => const SizedBox(width: ArSpace.sm),
                 itemBuilder: (context, index) =>
                     AnimeSearchResultCard(entry: rows[index], compact: true),
               ),
             ),
             loading: () => const SizedBox(
-              height: 150,
+              height: 196,
               child: Center(child: CircularProgressIndicator()),
             ),
             error: (error, _) => const SizedBox.shrink(),
@@ -316,213 +598,14 @@ class _RecentStripState extends ConsumerState<_RecentStrip> {
   }
 }
 
-/// Pannello dei filtri.
-class _FilterPanel extends ConsumerWidget {
-  const _FilterPanel({
-    required this.filters,
-    required this.onApply,
-    required this.onToggleGenre,
-  });
-
-  final AnimeFilters filters;
-  final ValueChanged<AnimeFilters> onApply;
-  final ValueChanged<String> onToggleGenre;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final genres = ref.watch(animeGenresProvider);
-
-    return Container(
-      // Senza il contenitore con bordo il pannello si confonderebbe con lo
-      // sfondo della lista: l'utente non capirebbe che e' una sezione che si
-      // chiude.
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
-        border: Border(
-          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
-        ),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-      // Il pannello scorre e non occupa piu' di meta' schermo: con cinque
-      // gruppi di filtri su un telefono prenderebbe piu' spazio dei risultati,
-      // e i risultati sono la ragione per cui l'utente ha aperto la
-      // schermata. Il tetto serve perche' il pannello sta in una Column con la
-      // lista: senza, cresce fino a uscire dal viewport e i filtri in fondo
-      // diventano irraggiungibili.
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.5,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text('Filtri', style: theme.textTheme.titleSmall),
-                  ),
-                  // Azzerare e' una delle azioni piu' frequenti dopo una ricerca
-                  // delusa: dover chiudere il pannello e azzerare le pastiglie una
-                  // a una e' il modo piu' rapido per far smettere di usare i filtri.
-                  TextButton(
-                    onPressed: filters.activeCount == 0
-                        ? null
-                        : () => onApply(const AnimeFilters()),
-                    child: const Text('Azzera'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final type in AnimeMediaType.values)
-                    ChoiceChip(
-                      label: Text(type.label),
-                      selected: filters.mediaType == type,
-                      onSelected: (selected) => onApply(
-                        selected
-                            ? filters.copyWith(mediaType: type)
-                            : filters.copyWith(clearMediaType: true),
-                      ),
-                    ),
-                  for (final season in AnimeSeason.values)
-                    FilterChip(
-                      label: Text(season.label),
-                      selected: filters.season == season,
-                      onSelected: (selected) => onApply(
-                        selected
-                            ? filters.copyWith(season: season)
-                            : filters.copyWith(clearSeason: true),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text('Stato', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 4),
-              // "Solo gli anime in corso" e' la domanda piu' frequente dopo
-              // "cerca un titolo": chi apre l'app vuole sapere cosa guardare adesso.
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final status in AnimeAirStatus.values)
-                    FilterChip(
-                      label: Text(status.label),
-                      selected: filters.status == status,
-                      onSelected: (selected) => onApply(
-                        selected
-                            ? filters.copyWith(status: status)
-                            : filters.copyWith(clearStatus: true),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text('Genere', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 4),
-              genres.when(
-                data: (rows) => Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  // I generi sono tanti: senza un limite allo scroll il pannello
-                  // occuperebbe piu' schermo della lista e coprirebbe i risultati
-                  // della ricerca appena fatta.
-                  children: [
-                    for (final genre in rows.take(24))
-                      FilterChip(
-                        label: Text(genre.name),
-                        selected: filters.genres.contains(genre.name),
-                        onSelected: (_) => onToggleGenre(genre.name),
-                      ),
-                  ],
-                ),
-                loading: () => const SizedBox(
-                  height: 40,
-                  child: Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                ),
-                // I generi non disponibili non devono bloccare i filtri che
-                // funzionano: formato, stagione e voto restano utilizzabili.
-                error: (error, _) => Text(
-                  'Generi non disponibili.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text('Voto minimo', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final score in const [6.0, 7.0, 8.0, 9.0])
-                    FilterChip(
-                      // Il separatore e' "8+": il segno "minimo" scritto per esteso
-                      // occuperebbe spazio nella pastiglia senza aggiungere
-                      // informazione.
-                      label: Text('${score.toInt()}+'),
-                      selected: filters.minScore == score,
-                      onSelected: (selected) => onApply(
-                        selected
-                            ? filters.copyWith(minScore: score)
-                            : filters.copyWith(clearScore: true),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text('Anno', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final year in const [
-                    2026,
-                    2025,
-                    2024,
-                    2020,
-                    2010,
-                    2000,
-                    1990,
-                  ])
-                    FilterChip(
-                      label: Text('${year}s'),
-                      selected: filters.yearFrom == year,
-                      onSelected: (selected) => onApply(
-                        selected
-                            ? filters.copyWith(yearFrom: year)
-                            : filters.copyWith(clearYear: true),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Lista dei risultati con infinite scroll.
+/// Griglia dei risultati con infinite scroll.
 ///
 /// Riceve il controller dello scroll dallo stato: senza, il reset a zero dopo
 /// una ricerca non avrebbe effetto e la lista resterebbe ferma a meta' dei
 /// risultati precedenti, con il nuovo testo in alto e righe che non
 /// corrispondono a nulla di quello che e' scritto.
-class _ResultsList extends ConsumerWidget {
-  const _ResultsList({
+class _ResultsGrid extends ConsumerWidget {
+  const _ResultsGrid({
     required this.rows,
     required this.pagination,
     required this.controller,
@@ -542,42 +625,36 @@ class _ResultsList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final stats = ref.watch(animeStatsProvider);
     final width = MediaQuery.sizeOf(context).width;
-    final columns = Breakpoints.gridColumns(width);
+
+    // Su telefono due colonne e non tre: a tre la locandina scende sotto i 110px
+    // e il titolo su due righe non entra piu', quindi ogni card mostra solo
+    // "quella li'" invece del nome.
+    final columns = switch (Breakpoints.of(width)) {
+      LayoutSize.compact => 2,
+      LayoutSize.medium => 3,
+      LayoutSize.expanded => width >= 1400 ? 6 : 5,
+    };
 
     return CustomScrollView(
       controller: scrollController,
       slivers: [
+        SliverToBoxAdapter(child: _CatalogHeader(stats: stats, found: rows.length)),
         SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          sliver: SliverToBoxAdapter(child: _CatalogHeader(stats: stats)),
-        ),
-        // Griglia su schermi larghi, lista su telefono: le card affiancate
-        // sfruttano lo spazio che su un telefono non esiste.
-        if (columns > 1)
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            sliver: SliverGrid.builder(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                mainAxisExtent: 150,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemCount: rows.length,
-              itemBuilder: (context, index) =>
-                  AnimeSearchResultCard(entry: rows[index]),
+          padding: EdgeInsets.symmetric(horizontal: ArSpace.page(context).left),
+          sliver: SliverGrid.builder(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              // La locandina e' in 2:3 e il titolo ci va sopra, quindi
+              // l'altezza e' quella della locandina piu' il margine: senza, il
+              // titolo dell'ultima riga verrebbe tagliato.
+              mainAxisExtent: 232,
+              crossAxisSpacing: ArSpace.sm,
+              mainAxisSpacing: ArSpace.sm,
             ),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            sliver: SliverList.separated(
-              itemCount: rows.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) =>
-                  AnimeSearchResultCard(entry: rows[index]),
-            ),
+            itemCount: rows.length,
+            itemBuilder: (context, index) => _card(context, rows[index]),
           ),
+        ),
         SliverToBoxAdapter(
           child: _ListFooter(pagination: pagination, onRetry: onLoadMore),
         ),
@@ -585,10 +662,22 @@ class _ResultsList extends ConsumerWidget {
         // online" mentre l'utente sta leggendo risultati validi lo
         // confonderebbe. Compare solo quando la ricerca locale non ha
         // prodotto nulla, ed e' [_EmptyResults] a proporlo in quel caso.
-        if (rows.isNotEmpty && controller.query.isEmpty)
+        if (controller.query.isEmpty)
           SliverToBoxAdapter(child: _RemoteSuggestion(onTap: onSearchRemote)),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        const SliverToBoxAdapter(child: SizedBox(height: ArSpace.xl)),
       ],
+    );
+  }
+
+  Widget _card(BuildContext context, AnimeEntry entry) {
+    return AnimeCard(
+      title: entry.title,
+      imageUrl: entry.imageUrl,
+      score: entry.score,
+      heroTag: entry.heroTag,
+      subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
+      genres: entry.genres,
+      onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
     );
   }
 }
@@ -606,15 +695,21 @@ class _ListFooter extends StatelessWidget {
 
     if (pagination.isLoadingMore) {
       return const Padding(
-        padding: EdgeInsets.all(20),
-        child: Center(child: CircularProgressIndicator()),
+        padding: EdgeInsets.all(ArSpace.lg),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
       );
     }
 
     final error = pagination.error;
     if (error != null) {
       return Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(ArSpace.lg),
         child: Column(
           children: [
             Text(
@@ -622,7 +717,7 @@ class _ListFooter extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: ArSpace.xs),
             TextButton(onPressed: onRetry, child: const Text('Riprova')),
           ],
         ),
@@ -632,7 +727,7 @@ class _ListFooter extends StatelessWidget {
     if (pagination.hasMore) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(ArSpace.lg),
       child: Text(
         'Fine dei risultati.',
         style: theme.textTheme.bodySmall?.copyWith(
@@ -652,10 +747,15 @@ class _RemoteSuggestion extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: EdgeInsets.fromLTRB(
+        ArSpace.page(context).left,
+        ArSpace.xs,
+        ArSpace.page(context).right,
+        0,
+      ),
       child: OutlinedButton.icon(
         onPressed: onTap,
-        icon: const Icon(Icons.cloud_download_outlined),
+        icon: const Icon(Icons.cloud_download_outlined, size: 18),
         label: const Text('Cerca anche su Jikan'),
       ),
     );
@@ -663,66 +763,73 @@ class _RemoteSuggestion extends StatelessWidget {
 }
 
 /// Testata con il contatore del catalogo.
+///
+/// Il contatore serve a capire se la ricerca sta funzionando: un catalogo con
+/// poche righe spiega perche' i risultati scarseggiano.
 class _CatalogHeader extends StatelessWidget {
-  const _CatalogHeader({required this.stats});
+  const _CatalogHeader({required this.stats, required this.found});
 
   final AsyncValue<AnimeCatalogStats> stats;
+  final int found;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final parts = <String>['$found risultati'];
 
-    return stats.maybeWhen(
+    stats.maybeWhen(
       data: (data) {
-        // Il contatore serve a capire se la ricerca sta funzionando: un
-        // catalogo con poche righe spiega perche' i risultati scarseggiano.
-        final parts = <String>[
-          if (data.totalAnime > 0) '${data.totalAnime} anime in catalogo',
-          if (data.airingNow > 0) '${data.airingNow} in onda',
-          if (data.currentSeason != null)
-            'stagione ${data.currentSeason!.label}',
-        ];
-
-        if (parts.isEmpty) return const SizedBox.shrink();
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            parts.join(' · '),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        );
+        // Il totale del catalogo viene per primo perche' e' il numero che
+        // spiega la ricerca: se la lista e' vuota e il catalogo ne ha 1250,
+        // il problema e' il testo cercato; se ne ha tre, il problema e' che il
+        // catalogo non e' ancora stato riempito.
+        if (data.totalAnime > 0) parts.insert(0, '${data.totalAnime} in catalogo');
+        if (data.airingNow > 0) parts.add('${data.airingNow} in onda');
+        if (data.currentSeason != null) {
+          parts.add('stagione ${data.currentSeason!.label}');
+        }
       },
       // L'assenza di statistiche non e' un errore da mostrare: e' solo un
       // contatore che non e' arrivato.
-      orElse: () => const SizedBox.shrink(),
+      orElse: () => {},
+    );
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        ArSpace.page(context).left,
+        ArSpace.sm,
+        ArSpace.page(context).right,
+        ArSpace.xs,
+      ),
+      child: Text(
+        parts.join(' · '),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
     );
   }
 }
 
 /// Scheletro durante il primo caricamento.
 ///
-/// Tre righe grigie al posto di uno spinner a schermo intero: rendono visibile
-/// che verra' una lista e quindi dove, mentre lo spinner lascia uno spazio vuoto
-/// che l'utente non sa come riempire.
-class _LoadingList extends StatelessWidget {
-  const _LoadingList();
+/// Le caselle grigie al posto di uno spinner a schermo intero: rendono visibile
+/// che verra' una griglia e quindi dove, mentre lo spinner lascia uno spazio
+/// vuoto che l'utente non sa come riempire.
+class _LoadingGrid extends StatelessWidget {
+  const _LoadingGrid();
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: 6,
-      separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (context, index) => Container(
-        height: 130,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-      ),
+    final columns = switch (Breakpoints.fromContext(context)) {
+      LayoutSize.compact => 2,
+      LayoutSize.medium => 3,
+      LayoutSize.expanded => 5,
+    };
+
+    return PosterGridSkeleton(
+      columns: columns,
+      itemCount: 10,
     );
   }
 }
@@ -743,7 +850,6 @@ class _EmptyResults extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final stats = ref.watch(animeStatsProvider);
     final catalogEmpty = stats.maybeWhen(
       data: (data) => data.isEmpty,
@@ -760,9 +866,8 @@ class _EmptyResults extends ConsumerWidget {
     if (pageError != null) {
       return _ErrorView(
         message: pageError.message,
-        onRetry: () => ref
-            .read(animeSearchProvider.notifier)
-            .searchRemote(forced: true),
+        onRetry: () =>
+            ref.read(animeSearchProvider.notifier).searchRemote(forced: true),
       );
     }
 
@@ -771,12 +876,16 @@ class _EmptyResults extends ConsumerWidget {
     if (pagination.isLoadingMore && hasQuery) {
       return const Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: EdgeInsets.all(ArSpace.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(height: ArSpace.md),
               Text('Cerco su Jikan...'),
             ],
           ),
@@ -787,66 +896,45 @@ class _EmptyResults extends ConsumerWidget {
     final message = hasFilters
         ? 'Nessun anime corrisponde ai filtri.'
         : catalogEmpty
-        ? 'Il catalogo e\' ancora vuoto.'
-        : hasQuery
-        ? 'Nessun risultato per "${controller.query}".'
-        : 'Cerca un anime per iniziare.';
+            ? 'Il catalogo e\' ancora vuoto.'
+            : hasQuery
+                ? 'Nessun risultato per "${controller.query}".'
+                : 'Cerca un anime per iniziare.';
 
     final hint = hasFilters
         ? 'Troppo stretti. Allarga i filtri o azzerali.'
         : catalogEmpty
-        ? 'La prima ricerca riempir�� il catalogo: i risultati trovati '
-              'restano salvati per tutti.'
-        : hasQuery
-        ? 'Prova col titolo giapponese, o con parole pi�� corte.'
-        : 'Per esempio "Attack on Titan", oppure un genere per vedere '
-              'tutto quello che c\'��.';
+            ? 'La prima ricerca riempira\' il catalogo: i risultati trovati '
+                'restano salvati per tutti.'
+            : hasQuery
+                ? 'Prova col titolo giapponese, o con parole piu\' corte.'
+                : 'Per esempio "Attack on Titan", oppure un genere per vedere '
+                    'tutto quello che c\'e\'.';
 
-    // Scorre invece di essere centrato a caso: quando il pannello filtri e' aperto
-    // lo spazio che resta e' poco e il blocco, se non scorre, va in overflow e
-    // l'utente perde il pulsante "Azzera i filtri" proprio quando gli serve.
+    // Scorre invece di essere centrato a caso: quando il pannello filtri e'
+    // aperto lo spazio che resta e' poco e il blocco, se non scorre, va in
+    // overflow e l'utente perde il pulsante "Azzera i filtri" proprio quando
+    // gli serve.
     return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              hasFilters ? Icons.filter_alt_off : Icons.search_off,
-              size: 48,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              message,
-              style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              hint,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (hasFilters)
-              OutlinedButton.icon(
+      child: EmptyState(
+        icon: hasFilters ? Icons.filter_alt_off : Icons.search_off,
+        title: message,
+        message: hint,
+        action: hasFilters
+            ? OutlinedButton.icon(
                 onPressed: controller.clearFilters,
                 icon: const Icon(Icons.clear),
                 label: const Text('Azzera i filtri'),
               )
-            else if (hasQuery)
-              FilledButton.tonalIcon(
-                onPressed: () => ref
-                    .read(animeSearchProvider.notifier)
-                    .searchRemote(forced: true),
-                icon: const Icon(Icons.cloud_download_outlined),
-                label: const Text('Cerca su Jikan'),
-              ),
-          ],
-        ),
+            : hasQuery
+                ? FilledButton.tonalIcon(
+                    onPressed: () => ref
+                        .read(animeSearchProvider.notifier)
+                        .searchRemote(forced: true),
+                    icon: const Icon(Icons.cloud_download_outlined),
+                    label: const Text('Cerca su Jikan'),
+                  )
+                : null,
       ),
     );
   }
@@ -854,7 +942,7 @@ class _EmptyResults extends ConsumerWidget {
 
 /// Schermata di errore iniziale.
 class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
+  const _ErrorView({required this.message, this.onRetry});
 
   final String message;
 
@@ -870,7 +958,7 @@ class _ErrorView extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(ArSpace.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -879,10 +967,10 @@ class _ErrorView extends StatelessWidget {
                 size: 44,
                 color: theme.colorScheme.error,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: ArSpace.sm),
               Text(message, textAlign: TextAlign.center),
               if (onRetry != null) ...[
-                const SizedBox(height: 16),
+                const SizedBox(height: ArSpace.md),
                 FilledButton.tonal(
                   onPressed: onRetry,
                   child: const Text('Riprova'),
@@ -896,12 +984,17 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-/// Copertina di un anime nella lista.
+/// Copertina di un anime nella striscia pieghevole.
 ///
 /// Esposta perche' i test la cercano per nome: verificare "la lista mostra
 /// risultati" con un finder costruito su un testo qualsiasi passerebbe anche se
 /// la lista non avesse card, mentre con la classe il test controlla davvero
 /// quante righe sono a schermo.
+///
+/// E' una versione senza stato dell'[AnimeCard] perche' nella striscia l'hover
+/// non esiste e la cella ha dimensioni fisse: il doppio `HoverRegion` e il
+/// bordo che si accende costerebbero animazioni su una lista che si scorre
+/// solo col dito.
 class AnimeSearchResultCard extends StatelessWidget {
   const AnimeSearchResultCard({
     required this.entry,
@@ -917,96 +1010,38 @@ class AnimeSearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (compact) return _compact(context);
+
+    return AnimeCard(
+      title: entry.title,
+      imageUrl: entry.imageUrl,
+      score: entry.score,
+      heroTag: entry.heroTag,
+      subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
+      genres: entry.genres,
+      onTap: () => _showDetail(context),
+    );
+  }
+
+  Widget _compact(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      child: compact
-          ? _buildCompact(context, theme)
-          : _buildRow(context, theme),
-    );
-  }
-
-  Widget _buildRow(BuildContext context, ThemeData theme) {
-    // Anno, tipo e votazione in una riga: sono i tre dati che servono per
-    // scegliere, e metterli in un elenco a voci farebbe tre righe per card.
-    final facts = entry.factsLabel;
-
-    return InkWell(
-      onTap: () => _showDetail(context),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _Poster(
-              url: entry.imageUrl,
-              title: entry.title,
-              heroTag: entry.heroTag,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    entry.title,
-                    style: theme.textTheme.titleMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  // Il titolo giapponese aiuta chi cerca in giapponese a
-                  // riconoscere subito l'opera, ma non deve spingere il titolo
-                  // principale fuori dai due righe assegnati.
-                  if (entry.japaneseTitle != null)
-                    Text(
-                      entry.japaneseTitle!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  if (facts.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      facts,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 6),
-                  _TrailingInfo(entry: entry),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCompact(BuildContext context, ThemeData theme) {
-    return InkWell(
+    return GestureDetector(
       onTap: () => _showDetail(context),
       child: SizedBox(
-        width: 110,
+        width: 124,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Poster(
+            _HeroPoster(
               url: entry.imageUrl,
               title: entry.title,
-              height: 96,
-              heroTag: entry.heroTag,
+              tag: entry.heroTag,
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: ArSpace.xs),
             Text(
               entry.title,
-              style: theme.textTheme.bodySmall,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.3),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1031,129 +1066,77 @@ class AnimeSearchResultCard extends StatelessWidget {
   }
 }
 
-/// Copertina con fallback.
+/// Locandina 2:3 con segnaposto.
 ///
-/// Senza immagine non si lascia lo spazio vuoto: la prima lettera del titolo e'
-/// un fallback che almeno dice di cosa si tratta, e un riquadro grigio non
+/// Senza immagine non si lascia lo spazio vuoto: la prima lettera del titolo
+/// e' un fallback che almeno dice di cosa si tratta, e un riquadro grigio non
 /// distingue "non c'e' immagine" da "non ha ancora caricato".
-class _Poster extends StatelessWidget {
-  const _Poster({
+class _HeroPoster extends StatelessWidget {
+  const _HeroPoster({
     required this.url,
     required this.title,
-    this.height = 120,
-    this.heroTag,
+    this.tag,
   });
 
   final String? url;
   final String title;
-  final double height;
-
-  /// Tag dell'hero, se l'immagine vola verso la scheda.
-  final Object? heroTag;
+  final Object? tag;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = Theme.of(context).colorScheme;
 
-    final image = _posterImage(context, theme);
-
-    // L'hero sta solo sull'immagine. Se avvolgesse anche il segnaposto, la
-    // transizione su un anime senza copertina mostrerebbe un rettangolo vuoto
-    // che si trasforma in un'immagine: peggio di non avere nulla.
-    if (heroTag == null) return image;
-
-    return Hero(
-      tag: heroTag!,
-      flightShuttleBuilder: (context, animation, direction, from, to) =>
-          ScaleTransition(scale: animation, child: image),
-      child: image,
-    );
-  }
-
-  Widget _posterImage(BuildContext context, ThemeData theme) {
+    Widget image;
     if (url == null || url!.isEmpty) {
-      return SizedBox(
-        width: 78,
-        height: height,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(8),
+      image = DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(ArRadii.card),
+        ),
+        child: Center(
+          child: Text(
+            title.isEmpty ? '?' : title.characters.first.toUpperCase(),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
           ),
-          child: Center(
-            child: Text(
-              title.isEmpty ? '?' : title.characters.first.toUpperCase(),
-              style: theme.textTheme.headlineSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+        ),
+      );
+    } else {
+      image = ClipRRect(
+        borderRadius: BorderRadius.circular(ArRadii.card),
+        child: Image.network(
+          url!,
+          // `errorBuilder` copre il caso piu' comune: copertine che non esistono
+          // piu' su MyAnimeList restano nel catalogo con un URL vecchio.
+          errorBuilder: (context, error, stack) => DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(ArRadii.card),
+            ),
+            child: Icon(
+              Icons.broken_image_outlined,
+              color: colors.onSurfaceVariant,
             ),
           ),
+          fit: BoxFit.cover,
         ),
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        url!,
-        width: 78,
-        height: height,
-        // `errorBuilder` copre il caso piu' comune: copertine che non esistono
-        // piu' su MyAnimeList restano nel catalogo con un URL vecchio.
-        errorBuilder: (context, error, stack) => SizedBox(
-          width: 78,
-          height: height,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.broken_image_outlined,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        fit: BoxFit.cover,
+    // L'hero sta solo sull'immagine. Se avvolgesse anche il segnaposto, la
+    // transizione su un anime senza copertina mostrerebbe un rettangolo vuoto
+    // che si trasforma in un'immagine: peggio di non avere nulla.
+    if (tag == null) return image;
+
+    return AspectRatio(
+      aspectRatio: 2 / 3,
+      child: Hero(
+        tag: tag!,
+        flightShuttleBuilder: (context, animation, direction, from, to) =>
+            ScaleTransition(scale: animation, child: image),
+        child: image,
       ),
-    );
-  }
-}
-
-/// Generi, voto e stato, in coda alla riga.
-class _TrailingInfo extends StatelessWidget {
-  const _TrailingInfo({required this.entry});
-
-  final AnimeEntry entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final small = theme.textTheme.bodySmall;
-
-    return Wrap(
-      spacing: 6,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        if (entry.status != null)
-          Text(
-            entry.status!.label,
-            style: small?.copyWith(color: theme.colorScheme.primary),
-          ),
-        if (entry.score != null)
-          // Il numero di voti va vicino al voto: 8,4 su 40 utenti e 8,4 su
-          // 800.000 non sono la stessa informazione, e senza il conteggio
-          // l'utente prende il primo per il secondo.
-          Text('★ ${entry.score!.toStringAsFixed(1)}', style: small),
-        ...[
-          for (final genre in entry.genres.take(3))
-            Text(
-              genre,
-              style: small?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-        ],
-      ],
     );
   }
 }

@@ -2,8 +2,10 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/breakpoints.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../domain/anime.dart';
@@ -574,17 +576,27 @@ class _Actions extends StatelessWidget {
                   'votare. Aprilo di nuovo dalla ricerca fra un momento: la '
                   'seconda volta sarà disponibile.',
             )
-          else
+          else ...[
             ArGradientButton(
               label: 'Vota in un gruppo',
               icon: Icons.star_outline_rounded,
               onPressed: () => _pickGroup(context),
             ),
-          const SizedBox(height: ArSpace.xs),
-          Text(
-            'Le classifiche sono per gruppo: scegli dove contare questo voto.',
-            style: theme.textTheme.bodySmall,
-          ),
+            const SizedBox(height: ArSpace.xs),
+            Text(
+              'Le classifiche sono per gruppo: scegli dove contare questo voto.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+          // Gli episodi stanno sotto il voto e non al suo posto: votare e'
+          // quello che si fa dopo aver visto, e mettere i due pulsanti uno
+          // sopra l'altro farebbe pensare che siano alternative. La voce
+          // compare solo se l'opera e' in catalogo, perche' senza `id` interno
+          // non c'e' nessun elenco episodi da aprire.
+          if (entry.id != null) ...[
+            const SizedBox(height: ArSpace.md),
+            _WatchButton(entry: entry),
+          ],
           const SizedBox(height: ArSpace.md),
         ],
       ),
@@ -605,6 +617,57 @@ class _Actions extends StatelessWidget {
   }
 
   static ThemeData theme(BuildContext context) => Theme.of(context);
+}
+
+/// Pulsante "Guarda" che porta alla visione degli episodi.
+///
+/// Secondario e non primario perche' votare e' l'azione da cui l'app trae
+/// senso fra un gruppo, mentre guardare e' un'opzione che ha senso anche da
+/// solo. Un solo pulsante in gradiente per schermata: due pulsanti uguali si
+/// contendono l'attenzione e l'utente non sa quale sia quello principale.
+class _WatchButton extends StatelessWidget {
+  const _WatchButton({required this.entry});
+
+  final AnimeEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ArPressable(
+      onTap: () => context.push(
+        AppRoutes.firstEpisode(entry.id!),
+        extra: entry.title,
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(ArRadii.control),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.play_arrow_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurface,
+              ),
+              const SizedBox(width: ArSpace.xs),
+              Text(
+                'Guarda gli episodi',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Riga avviso: sfondo tenue, icona, testo.

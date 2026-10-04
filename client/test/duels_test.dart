@@ -324,7 +324,10 @@ void main() {
 
       await tester.tap(find.text('Cowboy Bebop'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Prossima coppia'));
+      // `ArGradientButton` e non un `FilledButton`: la schermata e' stata
+      // portata sul design system e il pulsante ora e' quello con il gradiente
+      // del brand, quindi il finder va aggiornato insieme alla UI.
+      await tester.tap(find.text('Prossima coppia'));
       await tester.pumpAndSettle();
 
       expect(find.text('Hai scelto Cowboy Bebop'), findsNothing);
@@ -354,8 +357,10 @@ void main() {
       // Primo duello fra due anime a 1000: ognuno ne prende meta' dei 32 punti
       // massimi, quindi +16 e non +32. Aspettarsi 32 qui nasconderebbe un
       // errore nella formula, non un arrotondamento.
-      expect(find.text('+16'), findsOneWidget);
-      expect(find.text('-16'), findsOneWidget);
+      //
+      // Il delta e' senza segno: la freccia su o giu' porta il verso, e il
+      // numero da solo resta cosi' leggibile anche senza colore.
+      expect(find.text('16'), findsNWidgets(2));
     });
 
     testWidgets('su schermo largo gli Elo diventano tabella', (tester) async {

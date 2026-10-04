@@ -818,7 +818,10 @@ void main() {
       );
       await pump(tester);
 
-      expect(find.text('Torneo concluso'), findsOneWidget);
+      // Maiuscolo per via di `MetricLabel`: le etichette di sezione vanno in
+      // maiuscolo e con spaziatura fra le lettere, e' quello che le distingue
+      // dal testo solo piu' piccolo.
+      expect(find.text('TORNEO CONCLUSO'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Elimina'), findsNothing);
     });
 

@@ -257,6 +257,10 @@ void main() {
     testWidgets('il logout chiama il repository auth', (tester) async {
       await pumpScreen(tester, const ProfileScreen());
 
+      // `ensureVisible`: la pagina profilo e' piu' alta dello schermo del test,
+      // quindi il pulsante va portato in vista prima di premere.
+      await tester.ensureVisible(find.widgetWithText(OutlinedButton, 'Esci'));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(OutlinedButton, 'Esci'));
       await tester.pumpAndSettle();
 
@@ -283,7 +287,9 @@ void main() {
       await pumpScreen(tester, const ProfileScreen());
 
       await tester.enterText(find.widgetWithText(TextFormField, 'Nome utente'), 'ab');
-      await tester.tap(find.widgetWithText(FilledButton, 'Salva'));
+      await tester.ensureVisible(find.text('Salva'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Salva'));
       await tester.pumpAndSettle();
 
       expect(find.text('Almeno 3 caratteri.'), findsOneWidget);
@@ -310,7 +316,9 @@ void main() {
       await pumpScreen(tester, const ProfileScreen());
 
       await tester.enterText(find.widgetWithText(TextFormField, 'Nome utente'), 'marioplus');
-      await tester.tap(find.widgetWithText(FilledButton, 'Salva'));
+      await tester.ensureVisible(find.text('Salva'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Salva'));
       await tester.pumpAndSettle();
 
       expect(repo.updateCalls, 1);
@@ -322,7 +330,9 @@ void main() {
         ..updateFailure = const ProfileFailure('Questo nome utente e gia preso.');
       await pumpScreen(tester, const ProfileScreen(), profileRepo: taken);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Salva'));
+      await tester.ensureVisible(find.text('Salva'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Salva'));
       await tester.pumpAndSettle();
 
       expect(find.text('Questo nome utente e gia preso.'), findsOneWidget);

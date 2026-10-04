@@ -1,4 +1,5 @@
 import 'package:animerank/core/router/app_router.dart';
+import 'package:animerank/core/ui/section_header.dart';
 import 'package:animerank/features/ranking/presentation/ranking_controller.dart';
 import 'package:animerank/features/watchlist/data/watchlist_repository.dart';
 import 'package:animerank/features/watchlist/domain/watchlist.dart';
@@ -358,7 +359,10 @@ void main() {
       ]);
 
       await pump(tester);
-      await tester.tap(find.widgetWithText(ChoiceChip, 'In visione'));
+      // Il finder segue il componente: i filtri sono le `ArChip` del design
+      // system, non i chip di Material. La verifica resta la stessa — il
+      // filtro scelto mostra solo le voci in visione e nasconde le altre.
+      await tester.tap(find.widgetWithText(ArChip, 'In visione'));
       await tester.pumpAndSettle();
 
       expect(find.text('Cowboy Bebop'), findsOneWidget);
@@ -377,7 +381,7 @@ void main() {
       ]);
 
       await pump(tester);
-      await tester.tap(find.widgetWithText(FilterChip, 'Preferiti'));
+      await tester.tap(find.widgetWithText(ArChip, 'Preferiti'));
       await tester.pumpAndSettle();
 
       expect(find.text('Trigun'), findsOneWidget);

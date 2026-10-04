@@ -33,9 +33,20 @@ class HomeRow {
 /// un motivo.
 @immutable
 class HomeFeed {
-  const HomeFeed({required this.rows});
+  const HomeFeed({required this.rows, this.feature, this.catalog = const []});
 
   final List<HomeRow> rows;
+
+  /// Opera in evidenza nel banner.
+  ///
+  /// Va decisa qui e non nella schermata perche' la scelta dipende dai dati:
+  /// il banner prende il primo dei piu' votati fra le quattro righe, cosi' non
+  /// capita mai che lo stesso anime sia contemporaneamente il banner e la
+  /// prima card della prima riga sotto.
+  final AnimeEntry? feature;
+
+  /// Ultimi titoli del catalogo, per la griglia "tutti gli anime".
+  final List<AnimeEntry> catalog;
 
   static const empty = HomeFeed(rows: []);
 }
@@ -85,55 +96,114 @@ class HomeFeedController extends AsyncNotifier<HomeFeed> {
       // Riga mancante, home intatta.
     }
 
-    // Il catalogo locale alimenta le altre tre righe. Se questa lettura
-    // fallisce l'errore si propaga: e' un guasto vero, e mostrare la season da
-    // sola farebbe credere all'utente di vedere tutta la home.
-    final results = await repository.searchLocal('', limit: 60, offset: 0);
+    // Il catalogo locale alimenta le altre righe e la griglia. Se questa
+    // lettura fallisce l'errore si propaga: e' un guasto vero, e mostrare la
+    // season da sola farebbe credere all'utente di vedere tutta la home.
+    //
+    // 120 righe e non 60: la griglia finale mostra il catalogo per intero e un
+    // paio di righe in piu' non si vedono, mentre a 60 la griglia sembrerebbe
+    // piu' corta del catalogo che contiene.
+    final results = await repository.searchLocal('', limit: 120, offset: 0);
 
     if (results.results.isEmpty && season.isEmpty) return HomeFeed.empty;
 
     final entries = results.results;
 
-    return HomeFeed(rows: [
-      if (season.isNotEmpty)
-        HomeRow(
-          title: 'In uscita ora',
-          subtitle: 'Aggiornamenti della stagione corrente',
-          entries: season,
+    final top = _row(
+      title: 'I piu votati',
+      subtitle: 'Voto piu alto del catalogo',
+      entries: entries,
+      compare: (a, b) {
+        final byScore = _compareNullableDesc(a.score, b.score);
+        if (byScore != 0) return byScore;
+        return _compareNullableDesc(a.airedFrom, b.airedFrom);
+      },
+    );
+
+    // Il banner prende il primo dei piu' votati e quella riga perde il primo
+    // elemento: altrimenti l'utente vede la stessa locandina due volte a tre
+    // schermate di distanza e sembra che l'app non stia caricando nulla di
+    // nuovo.
+    final feature = top.entries.isEmpty ? null : top.entries.first;
+
+    return HomeFeed(
+      feature: feature,
+      catalog: entries,
+      rows: [
+        if (season.isNotEmpty)
+          HomeRow(
+            title: 'In uscita ora',
+            subtitle: 'Aggiornamenti della stagione corrente',
+            entries: season,
+          ),
+        _row(
+          title: 'Aggiornati di recente',
+          subtitle: 'Le ultime uscite nel catalogo',
+          entries: entries,
+          compare: (a, b) {
+            // `null` in coda: un anime senza data non e' fra i piu' recenti, ma
+            // non e' nemmeno da buttare, quindi resta in fondo invece di sparire.
+            final byDate = _compareNullableDesc(a.airedFrom, b.airedFrom);
+            if (byDate != 0) return byDate;
+            return _byScore(a, b);
+          },
         ),
-      _row(
-        title: 'Aggiornati di recente',
-        subtitle: 'Le ultime uscite nel catalogo',
-        entries: entries,
-        compare: (a, b) {
-          // `null` in coda: un anime senza data non e' fra i piu' recenti, ma
-          // non e' nemmeno da buttare, quindi resta in fondo invece di sparire.
-          final byDate = _compareNullableDesc(a.airedFrom, b.airedFrom);
-          if (byDate != 0) return byDate;
-          return _byScore(a, b);
-        },
-      ),
-      _row(
-        title: 'I piu votati',
-        subtitle: 'Voto piu alto del catalogo',
-        entries: entries,
-        compare: (a, b) {
-          final byScore = _compareNullableDesc(a.score, b.score);
-          if (byScore != 0) return byScore;
-          return _compareNullableDesc(a.airedFrom, b.airedFrom);
-        },
-      ),
-      _row(
-        title: 'I piu popolari',
-        subtitle: 'I piu cercati su MyAnimeList',
-        entries: entries,
-        compare: (a, b) {
-          final byPopularity = _compareNullableDesc(a.popularity, b.popularity);
-          if (byPopularity != 0) return byPopularity;
-          return _byScore(a, b);
-        },
-      ),
-    ]);
+        HomeRow(
+          title: top.title,
+          subtitle: top.subtitle,
+          entries: feature == null ? top.entries : top.entries.skip(1).toList(),
+        ),
+        _row(
+          title: 'I piu popolari',
+          subtitle: 'I piu cercati su MyAnimeList',
+          entries: entries,
+          compare: (a, b) {
+            final byPopularity = _compareNullableDesc(a.popularity, b.popularity);
+            if (byPopularity != 0) return byPopularity;
+            return _byScore(a, b);
+          },
+        ),
+        // "Per te" e' la coda della lista ordinata per voto e data, non una
+        // raccomandazione: il backend non ha un profilo di gusti da cui
+        // ricavarla, e mostrare un titolo a caso sotto un'etichetta che promette
+        // una scelta personale sarebbe una bugia. Qui l'etichetta dice cosa fa
+        // davvero — mescola i due criteri — cosi' la riga resta utile.
+        _row(
+          title: 'Per te',
+          subtitle: 'Voto alto e uscita recente',
+          entries: entries,
+          compare: (a, b) {
+            // Somma dei due criteri normalizzati: e' il modo piu' semplice per
+            // non far coincidere questa riga con le due precedenti, che sono
+            // gia' ordinate per uno dei due.
+            final byScore = _blend(a, b, (e) => e.score ?? 0);
+            if (byScore != 0) return byScore;
+            return _compareNullableDesc(a.airedFrom, b.airedFrom);
+          },
+        ),
+      ],
+    );
+  }
+
+  /// Confronto su un punteggio composto.
+  ///
+  /// Il peso della data e' volutamente basso rispetto al voto: un anime uscito
+  /// tre anni fa con voto 9 e uno uscito ieri con voto 7 devono stare vicini,
+  /// e il peso alto della data li separerebbe come se fossero due cose diverse.
+  static int _blend(AnimeEntry a, AnimeEntry b, double Function(AnimeEntry) read) {
+    const dateWeight = 0.25;
+    final now = DateTime.now();
+    // Gli anni senza data contano come zero: si mettono in fondo invece di
+    // far saltare l'ordinamento.
+    double years(AnimeEntry e) {
+      final from = e.airedFrom;
+      if (from == null) return 0;
+      return ((now.difference(from).inDays) / 365).clamp(0, 25);
+    }
+
+    final scoreA = read(a) - dateWeight * years(a);
+    final scoreB = read(b) - dateWeight * years(b);
+    return scoreB.compareTo(scoreA);
   }
 
   /// Una riga, scartata se troppo corta per essere un carosello.

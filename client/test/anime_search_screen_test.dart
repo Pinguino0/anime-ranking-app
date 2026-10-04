@@ -1,6 +1,8 @@
 import 'package:animerank/features/anime/data/anime_repository.dart';
 import 'package:animerank/features/anime/domain/anime.dart';
 import 'package:animerank/features/anime/presentation/anime_controller.dart';
+import 'package:animerank/core/ui/anime_card.dart';
+import 'package:animerank/core/ui/section_header.dart';
 import 'package:animerank/features/anime/presentation/screens/anime_search_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,7 +21,7 @@ void main() {
       );
       await pumpSearch(tester, repo);
 
-      await tester.enterText(find.byType(SearchBar), 'titan');
+      await tester.enterText(find.byType(TextField), 'titan');
       // Il rimando e' voluto: senza, ogni tasto aprirebbe una richiesta e
       // servirebbe una lettera per fare una ricerca.
       await tester.pump(const Duration(milliseconds: 400));
@@ -68,7 +70,7 @@ void main() {
       );
       await pumpSearch(tester, repo);
 
-      await tester.enterText(find.byType(SearchBar), '進撃');
+      await tester.enterText(find.byType(TextField), '進撃');
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.text('Attack on Titan'), findsOneWidget);
@@ -130,10 +132,10 @@ void main() {
               ];
         await pumpSearch(tester, repo);
 
-        await tester.tap(find.byTooltip('Filtri'));
+        await tester.tap(find.byType(ArChip).first);
         await tester.pumpAndSettle();
         // Attivo il filtro su un genere che non esiste.
-        await tapChip(tester, FilterChip, 'Comedy');
+        await tapChip(tester, ArChip, 'Comedy');
 
         // Il messaggio deve nominare i filtri come causa e offrire la via d'uscita:
         // "nessun risultato" da solo lascia l'utente a indovinare cosa toccare.
@@ -155,7 +157,7 @@ void main() {
 
       // Serve un testo da cercare: Jikan risponde a una domanda, non a "tutto".
       // Senza testo il pulsante non avrebbe niente da chiedere.
-      await tester.enterText(find.byType(SearchBar), 'akira');
+      await tester.enterText(find.byType(TextField), 'akira');
       await tester.pump(const Duration(milliseconds: 400));
 
       final pulsante = find.textContaining('Jikan');
@@ -212,7 +214,7 @@ void main() {
 
       repo.localFailure = const AnimeFailure('Rete assente.');
       await tester.dragUntilVisible(
-        find.byType(AnimeSearchResultCard).last,
+        find.byType(AnimeCard).last,
         find.byType(ListView),
         const Offset(0, -300),
       );
@@ -220,7 +222,7 @@ void main() {
 
       // I risultati iniziali restano visibili: il fallimento in coda non deve
       // far sparire quello che ha gia' funzionato.
-      expect(find.byType(AnimeSearchResultCard), findsWidgets);
+      expect(find.byType(AnimeCard), findsWidgets);
     });
   });
 
@@ -233,7 +235,7 @@ void main() {
         ];
       await pumpSearch(tester, repo);
 
-      await tester.tap(find.byTooltip('Filtri'));
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
 
       expect(find.text('Action'), findsOneWidget);
@@ -254,15 +256,17 @@ void main() {
             ];
       await pumpSearch(tester, repo);
 
-      expect(find.text('0'), findsNothing);
-      await tester.tap(find.byTooltip('Filtri'));
+      // Senza filtri la pastiglia non porta un numero: "Filtri · 0" occuperebbe
+      // spazio per dire che non c'e' niente da dire.
+      expect(find.text('Filtri'), findsOneWidget);
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
 
-      await tapChip(tester, FilterChip, 'Action');
+      await tapChip(tester, ArChip, 'Action');
 
       // Un filtro attivo deve essere visibile dal pannello chiuso, altrimenti
       // l'utente non sa perche' la lista e' cambiata.
-      expect(find.text('1'), findsOneWidget);
+      expect(find.text('Filtri · 1'), findsOneWidget);
     });
 
     testWidgets('azzera riporta tutti i risultati', (tester) async {
@@ -274,28 +278,29 @@ void main() {
       )..genresResult = const [AnimeGenre(name: 'Action', count: 1)];
       await pumpSearch(tester, repo);
 
-      expect(find.byType(AnimeSearchResultCard), findsNWidgets(2));
+      expect(find.byType(AnimeCard), findsNWidgets(2));
 
-      await tester.tap(find.byTooltip('Filtri'));
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
-      await tapChip(tester, FilterChip, 'Action');
-      expect(find.byType(AnimeSearchResultCard), findsOneWidget);
+      await tapChip(tester, ArChip, 'Action');
+      expect(find.byType(AnimeCard), findsOneWidget);
 
       // Anche "Azzera" va portato in vista: il pannello e' scorso in fondo per
       // raggiungere la pastiglia del genere, quindi l'intestazione e' fuori dal
       // viewport e il tap cadrebbe sul vuoto.
-      await tester.ensureVisible(find.text('Azzera'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Azzera'));
+      // "Azzera" compare due volte: nella barra e nell'intestazione del pannello.
+      // Il finder va ancorato alla barra, perche' e' li' che l'utente lo tocca
+      // senza dover aprire il pannello.
+      await tester.tap(find.widgetWithText(ArChip, 'Azzera'));
       await tester.pumpAndSettle();
 
       // Il pannello resta aperto dopo aver applicato un filtro e, aperto,
       // non lascia spazio per due schede: chiudere prima di contare, altrimenti
       // il test misurerebbe quanto schermo resta e non quanti risultati ci
       // sono.
-      await tester.tap(find.byTooltip('Filtri'));
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
-      expect(find.byType(AnimeSearchResultCard), findsNWidgets(2));
+      expect(find.byType(AnimeCard), findsNWidgets(2));
     });
 
     testWidgets('il filtro formato restringe i risultati', (tester) async {
@@ -307,13 +312,13 @@ void main() {
       );
       await pumpSearch(tester, repo);
 
-      expect(find.byType(AnimeSearchResultCard), findsNWidgets(2));
+      expect(find.byType(AnimeCard), findsNWidgets(2));
 
-      await tester.tap(find.byTooltip('Filtri'));
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
-      await tapChip(tester, ChoiceChip, 'Film');
+      await tapChip(tester, ArChip, 'Film');
 
-      expect(find.byType(AnimeSearchResultCard), findsOneWidget);
+      expect(find.byType(AnimeCard), findsOneWidget);
     });
 
     testWidgets('il filtro stato nasconde chi non e in onda', (tester) async {
@@ -329,11 +334,11 @@ void main() {
       )..genresResult = const [AnimeGenre(name: 'Action', count: 3)];
       await pumpSearch(tester, repo);
 
-      await tester.tap(find.byTooltip('Filtri'));
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
-      await tapChip(tester, FilterChip, 'In corso');
+      await tapChip(tester, ArChip, 'In corso');
 
-      expect(find.byType(AnimeSearchResultCard), findsNWidgets(2));
+      expect(find.byType(AnimeCard), findsNWidgets(2));
     });
 
     testWidgets('il filtro voto nasconde chi non ha voto', (tester) async {
@@ -347,11 +352,11 @@ void main() {
       );
       await pumpSearch(tester, repo);
 
-      await tester.tap(find.byTooltip('Filtri'));
+      await tester.tap(find.byType(ArChip).first);
       await tester.pumpAndSettle();
-      await tapChip(tester, FilterChip, '8+');
+      await tapChip(tester, ArChip, '8+');
 
-      expect(find.byType(AnimeSearchResultCard), findsOneWidget);
+      expect(find.byType(AnimeCard), findsOneWidget);
     });
   });
 
@@ -364,7 +369,7 @@ void main() {
       );
       await pumpSearch(tester, repo);
 
-      expect(find.byType(AnimeSearchResultCard), findsWidgets);
+      expect(find.byType(AnimeCard), findsWidgets);
 
       // Il trascinamento avviene sulla `CustomScrollView` dei risultati: e'
       // lei che ha il listener di scroll che carica la pagina successiva. La
@@ -416,8 +421,9 @@ void main() {
         ..statsFailure = const AnimeFailure('KO');
       await pumpSearch(tester, repo);
 
-      // Le statistiche non devono bloccare la ricerca: manca solo il contatore.
-      expect(find.text('Anime'), findsOneWidget);
+      // Le statistiche non devono bloccare la ricerca: manca solo il contatore,
+      // e quello che conta e' che i risultati ci sono lo stesso.
+      expect(find.byType(AnimeCard), findsOneWidget);
     });
   });
 }

@@ -11,6 +11,8 @@ import 'features/anime/data/anime_repository.dart';
 import 'features/anime/presentation/anime_controller.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/auth/presentation/auth_controller.dart';
+import 'features/episodes/data/episodes_repository.dart';
+import 'features/episodes/presentation/episodes_controller.dart';
 import 'features/duels/data/duels_repository.dart';
 import 'features/duels/presentation/duels_controller.dart';
 import 'features/groups/data/groups_repository.dart';
@@ -104,6 +106,13 @@ Future<void> main() async {
         ),
         tournamentsRepositoryProvider.overrideWithValue(
           SupabaseTournamentsRepository(client),
+        ),
+        // Episodi, fonti e progresso: stesso client degli altri moduli. Va
+        // dichiarato qui perche' il provider di default esiste solo per i test
+        // — in produzione un repository non inizializzato deve fallire subito
+        // invece di fingere che gli episodi non esistano.
+        episodesRepositoryProvider.overrideWithValue(
+          SupabaseEpisodesRepository(client),
         ),
       ],
       child: const AnimeRankApp(),

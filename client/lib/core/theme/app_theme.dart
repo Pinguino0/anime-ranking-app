@@ -4,15 +4,18 @@ import 'package:flutter/services.dart';
 /// Colori di AnimeRank.
 ///
 /// Identita' visiva: nero AMOLED come base, superfici tonali con appena una
-/// tinta indaco dentro, accento viola. Il nero non e' un grigio scuro travestito:
-/// e' il fondo della app, e su uno schermo OLED spento non consuma quasi nulla.
+/// tinta indaco dentro, e una coppia di accenti che regge tutta l'app — viola e
+/// blu. Il nero non e' un grigio scuro travestito: e' il fondo della app, e su
+/// uno schermo OLED spento non consuma quasi nulla.
 ///
-/// Il viola non e' decorazione, e' la regola dei contrasti: su nero puro un
-/// viola acceso legge come "premium" e al tempo stesso mantiene il rapporto
-/// di contrasto del testo sopra le superfici tonali.
+/// La coppia viola/blu non e' decorazione, e' la regola dei contrasti: i due
+/// colori hanno la stessa luminosita' percepita, quindi possono stare
+/// affiancati in un gradiente senza che uno dei due spari. Il magenta, che
+/// c'era prima, era piu' chiaro del viola e su nero puro tendeva al rosa: con
+/// lui il gradiente sembrava una luce di scena e non una firma.
 ///
-/// Da NON fare: prendere il blu acceso di AniList o il verde di MyAnimeList.
-/// Qui la firma e' la coppia viola/magenta sui gradienti.
+/// Da NON fare: prendere il verde di MyAnimeList o il blu acceso di AniList.
+/// Qui la firma e' la coppia viola/blu sui gradienti.
 class ArColors {
   const ArColors._();
 
@@ -36,11 +39,17 @@ class ArColors {
   static const Color containerHigh = Color(0xFF1B1B26);
   static const Color containerHighest = Color(0xFF232330);
 
-  // Accenti.
+  // Accenti: la coppia viola/blu.
   static const Color primary = Color(0xFF8B72FF);
   static const Color primaryDim = Color(0xFF6A4FE0);
-  static const Color accent = Color(0xFFFF4D8D);
-  static const Color accentDim = Color(0xFFC7346B);
+
+  /// Secondo accento: blu, non magenta.
+  ///
+  /// Stessa luminosita' percepita del viola di [primary], e per questo i due
+  /// possono stare nello stesso gradiente senza che il blu sembri piu' acceso
+  /// del viola — che e' esattamente cio' che succedeva con il magenta.
+  static const Color accent = Color(0xFF4C8DFF);
+  static const Color accentDim = Color(0xFF2E6AD6);
 
   // Semantici.
   static const Color success = Color(0xFF2DD4BF);
@@ -98,10 +107,14 @@ class ArColors {
   );
 
   /// Variante piu' fredda per sfondi grandi, meno aggressiva del brand.
+  ///
+  /// Diagonale come il brand, ma con poco viola: su una superficie grande il
+  /// gradiente del brand diventa una macchia di colore e stanca l'occhio, quindi
+  /// qui l'accento scende quasi subito e la pagina resta scura.
   static const LinearGradient subtle = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF141426), Color(0xFF0A0A12)],
+    colors: [Color(0xFF16162C), Color(0xFF0A0A12)],
   );
 
   /// Colore del badge per posizione in classifica.
@@ -282,8 +295,8 @@ class AppTheme {
       onPrimaryContainer: Color(0xFFE7E1FF),
       secondary: ArColors.accent,
       onSecondary: Colors.white,
-      secondaryContainer: Color(0xFF6E1B3E),
-      onSecondaryContainer: Color(0xFFFFE0EB),
+      secondaryContainer: Color(0xFF17336E),
+      onSecondaryContainer: Color(0xFFD9E6FF),
       tertiary: ArColors.success,
       onTertiary: Color(0xFF04302B),
       error: ArColors.danger,
@@ -321,10 +334,13 @@ class AppTheme {
       onPrimary: Colors.white,
       primaryContainer: Color(0xFFE7E1FF),
       onPrimaryContainer: Color(0xFF241468),
-      secondary: Color(0xFFD6356F),
+      // Il blu su bianco va scurito piu' di quanto sembri necessario: il
+      // `#4C8DFF` del tema scuro non passerebbe il contrasto AA come testo o
+      // come riempimento di pastiglia.
+      secondary: Color(0xFF1F5FCC),
       onSecondary: Colors.white,
-      secondaryContainer: Color(0xFFFFE0EB),
-      onSecondaryContainer: Color(0xFF5C0F2B),
+      secondaryContainer: Color(0xFFDCE8FF),
+      onSecondaryContainer: Color(0xFF0C2C63),
       tertiary: Color(0xFF0E9384),
       onTertiary: Colors.white,
       error: Color(0xFFD32F3D),

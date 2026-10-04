@@ -1,11 +1,17 @@
+import 'package:animerank/core/ui/content_row.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../anime/domain/anime.dart';
 import '../../../auth/presentation/widgets/auth_scaffold.dart';
 import '../../../../core/constants/breakpoints.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/ui/anime_thumb.dart';
+import '../../../../core/ui/section_header.dart';
+import '../../../../core/ui/transitions.dart';
 import '../../../ranking/presentation/ranking_controller.dart';
-import '../../../ranking/presentation/screens/ranking_screen.dart';
 import '../../domain/watchlist.dart';
 import '../watchlist_controller.dart';
 
@@ -46,6 +52,7 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     final state = ref.watch(watchlistProvider(groupId));
     final totals = ref.watch(watchlistTotalsProvider(groupId)).value;
     final entries = _visible(state.value ?? const <WatchlistEntry>[]);
+    final expanded = Breakpoints.fromContext(context).isExpanded;
 
     return Scaffold(
       appBar: AppBar(
@@ -83,8 +90,12 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           const Divider(height: 1),
           Expanded(
             child: state.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) => _ErrorState(
+              // Lo scheletro ha la stessa altezza della riga vera: un
+              // segnaposto piu' basso farebbe salire tutta la lista al primo
+              // arrivo dei dati, e l'occhio perderebbe la riga che stava
+              // leggendo.
+              loading: () => _WatchlistSkeleton(),
+              error: (error, _) => ErrorState(
                 message: '$error',
                 onRetry: () => ref.read(watchlistProvider(groupId).notifier).refresh(),
               ),
@@ -92,27 +103,35 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
               // mostrare: con il filtro attivo l elenco vuoto e' la risposta
               // ("non hai preferiti"), non un caricamento da rifare.
               data: (_) => entries.isEmpty
-                  ? _EmptyState(
-                      message: _emptyMessage,
-                      hint: _emptyHint,
+                  ? EmptyState(
+                      icon: _favoritesOnly
+                          ? Icons.star_border
+                          : Icons.bookmark_border,
+                      title: _emptyMessage,
+                      message: _emptyHint,
                     )
-                  : Breakpoints.fromContext(context).isExpanded
-                      ? RefreshIndicator(
-                          onRefresh: () =>
-                              ref.read(watchlistProvider(groupId).notifier).refresh(),
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: WatchlistTable(entries: entries, groupId: groupId),
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: () =>
-                              ref.read(watchlistProvider(groupId).notifier).refresh(),
-                          child: ListView(
-                            padding: const EdgeInsets.only(bottom: 24),
-                            children: _cards(context, ref, entries),
-                          ),
-                        ),
+                  : RefreshIndicator(
+                      onRefresh: () =>
+                          ref.read(watchlistProvider(groupId).notifier).refresh(),
+                      child: expanded
+                          ? SingleChildScrollView(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: ArSpace.sm,
+                              ),
+                              child: WatchlistTable(
+                                entries: entries,
+                                groupId: groupId,
+                              ),
+                            )
+                          : ListView(
+                              padding: EdgeInsets.only(
+                                left: ArSpace.page(context).left,
+                                right: ArSpace.page(context).right,
+                                bottom: ArSpace.xxl,
+                              ),
+                              children: _cards(context, ref, entries),
+                            ),
+                    ),
             ),
           ),
         ],
@@ -122,6 +141,11 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
               onPressed: () => _addFromRanking(context, ref),
               icon: const Icon(Icons.add),
               label: const Text('Aggiungi'),
+              backgroundColor: ArColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(ArRadii.control),
+              ),
             )
           : null,
     );
@@ -158,15 +182,21 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
 
   /// Schede con le intestazioni di stato, per il formato a lista.
   List<Widget> _cards(BuildContext context, WidgetRef ref, List<WatchlistEntry> entries) {
-    final theme = Theme.of(context);
+    final groupId = widget.groupId;
 
     if (_status != null || _favoritesOnly) {
       return [
-        for (final entry in entries) WatchlistRow(entry: entry, groupId: widget.groupId),
+        for (final (i, entry) in entries.indexed)
+          WatchlistRow(entry: entry, groupId: groupId, revealMs: _delayOf(i)),
       ];
     }
 
     final widgets = <Widget>[];
+
+    // L'indice corre su tutte le righe, non dentro ogni gruppo: l'onda deve
+    // attraversare la pagina, altrimenti le intestazioni di stato ripartono
+    // da capo e la lista sembra spezzata in tre elenchi.
+    var seen = 0;
 
     for (final status in WatchStatus.displayOrder) {
       final rows = entries.where((e) => e.status == status).toList();
@@ -174,7 +204,12 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
 
       widgets.add(
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          padding: EdgeInsets.fromLTRB(
+            ArSpace.page(context).left,
+            ArSpace.md,
+            ArSpace.page(context).right,
+            ArSpace.xs,
+          ),
           child: Row(
             children: [
               Container(
@@ -185,27 +220,39 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(status.label, style: theme.textTheme.titleSmall),
-              const SizedBox(width: 6),
-              Text(
-                '${rows.length}',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              const SizedBox(width: ArSpace.xs),
+              Expanded(
+                child: Text(
+                  status.label,
+                  style: Theme.of(context).textTheme.titleSmall,
                 ),
               ),
+              MetricLabel('${rows.length}'),
             ],
           ),
         ),
       );
 
       widgets.addAll([
-        for (final entry in rows) WatchlistRow(entry: entry, groupId: widget.groupId),
+        for (final entry in rows)
+          WatchlistRow(
+            entry: entry,
+            groupId: groupId,
+            revealMs: _delayOf(seen++),
+          ),
       ]);
     }
 
     return widgets;
   }
+
+  /// Ritardo di comparsa della riga numero [index].
+  ///
+  /// Cresce con la posizione e si ferma a 320ms: oltre il limite le righe in
+  /// fondo arriverebbero cosi' tardi che l'utente le cercherebbe gia' come se
+  /// mancassero. Lo stesso tetto usato dalle caroselli della home, cosi' anche
+  /// qui l'ingresso ha la stessa cadenza del resto dell'app.
+  static int _delayOf(int index) => (index * 30).clamp(0, 320);
 
   Future<void> _refresh(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -225,6 +272,8 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.transparent,
       builder: (context) => AddFromRankingSheet(groupId: widget.groupId),
     );
   }
@@ -243,7 +292,26 @@ Color statusColor(WatchStatus status) => switch (status) {
       WatchStatus.paused => ArColors.paused,
     };
 
+/// Scheda anime ricostruita da una riga di watchlist.
+///
+/// Come nella classifica: la riga porta l'id interno di `public.anime` e il
+/// minimo dei dati, quindi la scheda mostra la realta' di quello che c'e',
+/// senza riempirsi i buchi con copertine o voti inventati. La lista dei voti e'
+/// un'altra tabella e non si ricava da qui.
+AnimeEntry _animeOf(WatchlistEntry entry) => AnimeEntry(
+      externalId: entry.animeId,
+      title: entry.title,
+      imageUrl: entry.imageUrl,
+      episodes: entry.episodes,
+      year: entry.year,
+      genres: entry.genres,
+      status: entry.airing ? AnimeAirStatus.airing : null,
+    );
+
 /// Cifre della watchlist, in alto.
+///
+/// Un bordo in basso invece di un'ombra: la striscia si appoggia al fondo della
+/// pagina, che e' scuro, e un'ombra su fondo scuro non si vede.
 class _TotalsStrip extends StatelessWidget {
   const _TotalsStrip({required this.totals});
 
@@ -251,22 +319,31 @@ class _TotalsStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: theme.colorScheme.surfaceContainerHigh,
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: ArColors.containerLow,
+        border: Border(bottom: BorderSide(color: ArColors.borderSoft)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: EdgeInsets.symmetric(
+          horizontal: ArSpace.page(context).left,
+          vertical: ArSpace.sm,
+        ),
         child: SafeArea(
           top: false,
           bottom: false,
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _Stat(label: 'In watchlist', value: '${totals.entries}'),
-              _Stat(label: 'In visione', value: '${totals.watching}'),
-              _Stat(label: 'Completati', value: '${totals.completed}'),
-              _Stat(label: 'Episodi', value: '${totals.episodes}'),
+              // `Expanded` e non `spaceEvenly`: le quattro cifre hanno larghezze
+              // diverse (3 contro 1.240) e lo spazio fra loro dipenderebbe
+              // allora dalla lunghezza dei numeri, spostando ogni etichetta a
+              // ogni aggiornamento. Con Expanded le colonne restano ferme e il
+              // testo si accorcia: su uno schermo da 340px l'etichetta lunga
+              // non esce dai bordi.
+              _Stat(label: 'In watchlist', value: totals.entries),
+              _Stat(label: 'In visione', value: totals.watching),
+              _Stat(label: 'Completati', value: totals.completed),
+              _Stat(label: 'Episodi', value: totals.episodes),
             ],
           ),
         ),
@@ -279,23 +356,91 @@ class _Stat extends StatelessWidget {
   const _Stat({required this.label, required this.value});
 
   final String label;
-  final String value;
+  final int value;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(value, style: theme.textTheme.titleMedium),
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+    return Expanded(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            // Il punto come separatore delle migliare: nella scrittura
+            // italiana il punto e' il separatore, e un conteggio abbreviato
+            // su un totale che si aggiorna spesso fa perdere il conto.
+            _thousands(value),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: ArColors.textHigh,
+              fontVariations: const [FontVariation('wght', 700)],
+            ),
           ),
+          const SizedBox(height: ArSpace.xxs),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ArColors.textLow,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _thousands(int value) {
+    final digits = value.abs().toString();
+    final buffer = StringBuffer(value < 0 ? '-' : '');
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) buffer.write('.');
+      buffer.write(digits[i]);
+    }
+    return buffer.toString();
+  }
+}
+
+/// Scheletro della lista: righe vuote alla stessa altezza di quelle vere.
+class _WatchlistSkeleton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final page = ArSpace.page(context);
+
+    return ListView.builder(
+      padding: EdgeInsets.fromLTRB(
+        page.left,
+        ArSpace.xs,
+        page.right,
+        ArSpace.xxl,
+      ),
+      itemCount: 6,
+      itemBuilder: (context, _) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: ArSpace.xxs),
+        child: Row(
+          children: [
+            SkeletonBox(width: 52, height: 52, radius: ArRadii.chip),
+            SizedBox(width: ArSpace.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SkeletonBox(height: 14),
+                  SizedBox(height: ArSpace.xs),
+                  SkeletonBox(height: 11, width: 120),
+                ],
+              ),
+            ),
+            SizedBox(width: ArSpace.sm),
+            SkeletonBox(width: 88, height: 30, radius: ArRadii.chip),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -320,50 +465,51 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final page = ArSpace.page(context);
+
+    // Altezza derivata dal passo del design system e non un numero scelto a
+    // caso: chip da 32px (8 di padding verticale + 16 di riga) piu' due di aria
+    // sopra e sotto arrivano esattamente a 48px.
     return SizedBox(
-      height: 52,
+      height: ArSpace.xxl + ArSpace.xs,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: page.left,
+          vertical: ArSpace.xs,
+        ),
         children: [
-          ChoiceChip(
-            label: const Text('Tutti'),
+          ArChip(
+            label: 'Tutti',
             selected: status == null && !favoritesOnly,
-            onSelected: (_) {
+            onTap: () {
               onStatus(null);
               onFavorites(false);
             },
           ),
-          const SizedBox(width: 8),
-          FilterChip(
-            avatar: Icon(Icons.star, size: 18, color: ArColors.favorite),
-            label: const Text('Preferiti'),
+          const SizedBox(width: ArSpace.xs),
+          ArChip(
+            label: 'Preferiti',
+            icon: Icons.star,
+            iconColor: ArColors.favorite,
             selected: favoritesOnly,
-            onSelected: onFavorites,
+            onTap: () => onFavorites(!favoritesOnly),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: ArSpace.xs),
           // Il separatore sta fra i due gruppi di filtri: "Tutti" toglie
           // entrambi, gli altri sono indipendenti.
           for (final s in WatchStatus.displayOrder) ...[
-            const SizedBox(width: 8),
-            ChoiceChip(
-              avatar: Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: statusColor(s),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              label: Text(s.label),
+            const SizedBox(width: ArSpace.xs),
+            ArChip(
+              label: s.label,
+              icon: Icons.circle,
+              iconColor: statusColor(s),
               selected: status == s && !favoritesOnly,
-              onSelected: (selected) {
-                // Rischedere lo stesso filtro lo deseleziona: con i chip
-                // l'utente non ha un altro posto da premere per tornare a
-                // vedere tutto, e "Tutti" in fondo alla riga si vede solo
-                // scorrendo.
-                onStatus(selected && !favoritesOnly ? s : null);
-              },
+              // Rischedere lo stesso filtro lo deseleziona: con i chip
+              // l'utente non ha un altro posto da premere per tornare a
+              // vedere tutto, e "Tutti" in fondo alla riga si vede solo
+              // scorrendo.
+              onTap: () => onStatus(status == s && !favoritesOnly ? null : s),
             ),
           ],
         ],
@@ -386,8 +532,14 @@ class WatchlistTable extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DataTable(
-      columnSpacing: 24,
-      headingRowHeight: 40,
+      headingRowColor: const WidgetStatePropertyAll(ArColors.containerHigh),
+      // La colonna delle caselle sparisce: con `onSelectChanged` attivo la
+      // `DataTable` la aggiunge da sola, e qui non si sceglie nulla — si apre
+      // una scheda. Una colonna di caselle vuote sposterebbe a destra tutte
+      // le colonne vere.
+      showCheckboxColumn: false,
+      columnSpacing: ArSpace.lg,
+      headingRowHeight: 44,
       columns: const [
         DataColumn(label: Text('Anime')),
         DataColumn(label: Text('Stato')),
@@ -398,11 +550,31 @@ class WatchlistTable extends ConsumerWidget {
       rows: [
         for (final entry in entries)
           DataRow(
+            // La riga intera apre la scheda, come nella classifica: in una
+            // tabella non c'e' un'area "titolino" da premere e costringere a
+            // puntare il mouse al testo renderebbe la meta' della riga muta.
+            onSelectChanged: (_) => _openDetail(context, entry),
             cells: [
               // Larghezza fissata perche' `DataTable` misura ogni colonna sul
               // contenuto: senza un tetto, un titolo lungo spingerebbe le
               // colonne dei numeri fuori dalla finestra.
-              DataCell(SizedBox(width: 340, child: _AnimeLine(entry: entry))),
+              DataCell(
+                SizedBox(
+                  width: 340,
+                  child: Row(
+                    children: [
+                      AnimeThumb(
+                        url: entry.imageUrl,
+                        title: entry.title,
+                        size: 44,
+                        radius: ArRadii.chip,
+                      ),
+                      const SizedBox(width: ArSpace.sm),
+                      Expanded(child: _AnimeLine(entry: entry)),
+                    ],
+                  ),
+                ),
+              ),
               DataCell(_StatusMenu(entry: entry, groupId: groupId)),
               DataCell(_EpisodeButton(entry: entry, groupId: groupId)),
               DataCell(_FavoriteButton(entry: entry, groupId: groupId)),
@@ -416,6 +588,13 @@ class WatchlistTable extends ConsumerWidget {
             ],
           ),
       ],
+    );
+  }
+
+  Future<void> _openDetail(BuildContext context, WatchlistEntry entry) {
+    return context.push<void>(
+      AppRoutes.animeDetail,
+      extra: _animeOf(entry),
     );
   }
 
@@ -443,31 +622,61 @@ class WatchlistTable extends ConsumerWidget {
 /// [WatchlistTable]. Su schermo largo una riga a scheda con stato, episodi e
 /// preferito lascia piu' spazio vuoto dei dati che mostra.
 class WatchlistRow extends StatelessWidget {
-  const WatchlistRow({required this.entry, required this.groupId, super.key});
+  const WatchlistRow({
+    required this.entry,
+    required this.groupId,
+    this.revealMs = 0,
+    super.key,
+  });
 
   final WatchlistEntry entry;
   final String groupId;
 
+  /// Ritardo di comparsa, per l'onda della lista.
+  final int revealMs;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final anime = _animeOf(entry);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    // La scheda e' l'involucro premibile e non la riga intera: il tocco
+    // apre la scheda dell'opera, mentre stato, episodi e preferito hanno
+    // gia' un controllo tutto loro e devono restare indipendenti. Un
+    // `InkWell` su tutta la riga ruberebbe il tocco a quei tre pulsanti e
+    // aprirebbe l'anime mentre l'utente credeva di cambiarne lo stato.
+    final card = Container(
+      margin: const EdgeInsets.symmetric(vertical: ArSpace.xxs),
+      padding: const EdgeInsets.all(ArSpace.sm),
+      decoration: BoxDecoration(
+        color: ArColors.container,
+        borderRadius: BorderRadius.circular(ArRadii.card),
+        // Filetto colorato sullo stato: su fondo scuro un bordo neutro fa
+        // sparire le righe una dentro l'altra, e il colore qui non e'
+        // decorazione — e' la stessa informazione del pallino.
+        border: Border.all(
+          color: statusColor(entry.status).withValues(alpha: 0.16),
+        ),
+      ),
       child: Column(
         children: [
           Row(
             children: [
-              AnimeThumb(url: entry.imageUrl, title: entry.title, size: 44),
-              const SizedBox(width: 12),
+              AnimeThumb(
+                url: entry.imageUrl,
+                title: entry.title,
+                size: 52,
+                radius: ArRadii.chip,
+                heroTag: anime.heroTag,
+              ),
+              const SizedBox(width: ArSpace.sm),
               Expanded(child: _AnimeLine(entry: entry)),
-              const SizedBox(width: 8),
+              const SizedBox(width: ArSpace.xs),
               _FavoriteButton(entry: entry, groupId: groupId),
               _OverflowMenu(entry: entry, groupId: groupId),
             ],
           ),
           Padding(
-            padding: const EdgeInsets.only(left: 56, top: 4),
+            padding: const EdgeInsets.only(top: ArSpace.xs),
             child: Row(
               children: [
                 _StatusChip(entry: entry, groupId: groupId),
@@ -478,17 +687,43 @@ class WatchlistRow extends StatelessWidget {
           ),
           if (entry.progress != null)
             Padding(
-              padding: const EdgeInsets.only(left: 56, right: 8, top: 6),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: entry.progress,
-                  minHeight: 4,
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                ),
-              ),
+              padding: const EdgeInsets.only(top: ArSpace.xs),
+              child: _ProgressBar(value: entry.progress!, color: statusColor(entry.status)),
             ),
         ],
+      ),
+    );
+
+    return ArReveal(
+      delayMs: revealMs,
+      child: ArPressable(
+        onTap: () => context.push(AppRoutes.animeDetail, extra: anime),
+        child: card,
+      ),
+    );
+  }
+}
+
+/// Barra di avanzamento sugli episodi.
+///
+/// La traccia resta in un colore spento perche' e' il massimo possibile, e il
+/// riempimento prende il colore dello stato: e' la stessa informazione del
+/// pallino, ripetuta in forma di lunghezza.
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar({required this.value, required this.color});
+
+  final double value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(ArSpace.xxs),
+      child: LinearProgressIndicator(
+        value: value,
+        minHeight: ArSpace.xxs,
+        valueColor: AlwaysStoppedAnimation(color),
+        backgroundColor: ArColors.containerHighest,
       ),
     );
   }
@@ -519,15 +754,15 @@ class _AnimeLine extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.titleSmall,
         ),
-        if (meta.isNotEmpty)
+        if (meta.isNotEmpty) ...[
+          const SizedBox(height: ArSpace.xxs),
           Text(
             meta,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textMid),
           ),
+        ],
       ],
     );
   }
@@ -555,7 +790,7 @@ List<PopupMenuItem<String>> _statusItems(WatchStatus current) => [
                 size: 18,
                 color: statusColor(status),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: ArSpace.sm),
               Expanded(
                 child: Text(
                   status.label,
@@ -568,7 +803,7 @@ List<PopupMenuItem<String>> _statusItems(WatchStatus current) => [
         ),
     ];
 
-/// Salva il nuovo stato e segnala l errore se il backend lo rifiuta.
+/// Salva il nuovo stato e segnala l'errore se il backend lo rifiuta.
 ///
 /// Le tre copie del menu chiamano questa funzione invece di ripetere il
 /// `try/catch`: un messaggio d'errore mostrato in un punto e non in un altro
@@ -598,6 +833,10 @@ Future<void> _saveStatus(
 /// Nella riga a scheda lo stato e' un elemento cliccabile con la sua
 /// etichetta: e' l'informazione principale di una watchlist e deve potersi
 /// cambiare senza aprire prima un altro menu.
+///
+/// La stessa [ArChip] dei filtri, con la freccia: condividere il componente
+/// fa si che una pastiglia cambiata qui non resti indietro rispetto a quella
+/// sopra, e il raggio e' quello di tutto il resto.
 class _StatusChip extends ConsumerWidget {
   const _StatusChip({required this.entry, required this.groupId});
 
@@ -606,8 +845,6 @@ class _StatusChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-
     return PopupMenuButton<String>(
       tooltip: 'Cambia stato',
       initialValue: entry.status.wire,
@@ -620,10 +857,16 @@ class _StatusChip extends ConsumerWidget {
       ),
       itemBuilder: (context) => _statusItems(entry.status),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(
+          horizontal: ArSpace.sm,
+          vertical: ArSpace.xs,
+        ),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(20),
+          color: statusColor(entry.status).withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(ArRadii.chip),
+          border: Border.all(
+            color: statusColor(entry.status).withValues(alpha: 0.35),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -636,7 +879,7 @@ class _StatusChip extends ConsumerWidget {
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: ArSpace.xs),
             // Troncato e non fisso: la colonna della tabella si stringe quando
             // le colonne dei numeri hanno piu' cifre, e un'etichetta che esce
             // dalla cella sposta tutte le colonne invece di accorciarsi.
@@ -645,11 +888,13 @@ class _StatusChip extends ConsumerWidget {
                 entry.status.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: ArColors.textHigh,
+                    ),
               ),
             ),
-            const SizedBox(width: 2),
-            Icon(Icons.arrow_drop_down, size: 18, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: ArSpace.xxs),
+            Icon(Icons.arrow_drop_down, size: 18, color: ArColors.textLow),
           ],
         ),
       ),
@@ -682,7 +927,7 @@ class _StatusMenu extends ConsumerWidget {
       ),
       itemBuilder: (context) => _statusItems(entry.status),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: ArSpace.xs),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -694,16 +939,17 @@ class _StatusMenu extends ConsumerWidget {
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: ArSpace.xs),
             Flexible(
               child: Text(
                 entry.status.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
-            const SizedBox(width: 2),
-            const Icon(Icons.arrow_drop_down, size: 20),
+            const SizedBox(width: ArSpace.xxs),
+            const Icon(Icons.arrow_drop_down, size: 20, color: ArColors.textLow),
           ],
         ),
       ),
@@ -727,7 +973,7 @@ class _FavoriteButton extends ConsumerWidget {
       tooltip: entry.isFavorite ? 'Togli dai preferiti' : 'Metti tra i preferiti',
       icon: Icon(
         entry.isFavorite ? Icons.star : Icons.star_border,
-        color: entry.isFavorite ? ArColors.favorite : null,
+        color: entry.isFavorite ? ArColors.favorite : ArColors.textLow,
       ),
       onPressed: busy
           ? null
@@ -755,15 +1001,12 @@ class _EpisodeButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-
     return TextButton.icon(
       onPressed: () => _open(context, ref),
       icon: const Icon(Icons.playlist_add_check, size: 18),
       label: Text(entry.episodeLabel),
       style: TextButton.styleFrom(
-        foregroundColor:
-            entry.hasStarted ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+        foregroundColor: entry.hasStarted ? ArColors.primary : ArColors.textLow,
       ),
     );
   }
@@ -773,6 +1016,7 @@ class _EpisodeButton extends ConsumerWidget {
     final episode = await showModalBottomSheet<int>(
       context: context,
       isScrollControlled: true,
+      showDragHandle: true,
       builder: (context) => EpisodeSheet(entry: entry),
     );
 
@@ -865,6 +1109,7 @@ class _OverflowMenu extends ConsumerWidget {
     }
   }
 }
+
 /// Conferma prima di togliere una voce.
 ///
 /// La rimozione e' definitiva e non si annulla: senza conferma un tocco su una
@@ -917,29 +1162,31 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final total = _total;
+    final page = ArSpace.page(context);
 
     return Padding(
       padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 24,
-        bottom: MediaQuery.viewInsetsOf(context).bottom + 24,
+        left: page.left,
+        right: page.right,
+        top: ArSpace.lg,
+        // Il margine inferiore segue la tastiera: senza, il foglio coprirebbe
+        // il cursore e i due pulsanti proprio mentre si sta scegliendo il
+        // numero.
+        bottom: MediaQuery.viewInsetsOf(context).bottom + ArSpace.lg,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Episodi guardati', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 2),
+          Text('Episodi guardati', style: theme.textTheme.titleLarge),
+          const SizedBox(height: ArSpace.xxs),
           Text(
             widget.entry.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textMid),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: ArSpace.lg),
           Row(
             children: [
               IconButton.filledTonal(
@@ -956,7 +1203,7 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
                 ),
               ),
               IconButton.filledTonal(
-                // Il massimo e il totale solo quando e' noto: con `episodes` a
+                // Il massimo e' il totale solo quando e' noto: con `episodes` a
                 // null non c'e' un limite da rispettare e bloccare il pulsone
                 // farebbe sembrare l anime senza dati, quando invece e' solo un
                 // anime ancora in corso senza numero di episodi.
@@ -967,7 +1214,7 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
             ],
           ),
           if (total > 0) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: ArSpace.xs),
             Slider(
               value: _episode.toDouble().clamp(0, total.toDouble()),
               max: total.toDouble(),
@@ -981,10 +1228,10 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
           ],
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: ArSpace.xs),
               child: AuthErrorBanner.error(_error!),
             ),
-          const SizedBox(height: 16),
+          const SizedBox(height: ArSpace.lg),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -992,7 +1239,7 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Annulla'),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: ArSpace.xs),
               FilledButton(
                 // Disabilitato invece che fallire al salvataggio: l errore
                 // arrival comunque dal backend, qui serve a non far perdere il
@@ -1041,6 +1288,7 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final page = ArSpace.page(context);
     final ranking = ref.watch(rankingProvider(widget.groupId));
     final existing = {
       for (final e in ref.watch(watchlistProvider(widget.groupId)).value ?? const [])
@@ -1051,67 +1299,122 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
       expand: false,
       initialChildSize: 0.7,
       builder: (context, scrollController) {
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Aggiungi dalla classifica', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Gli anime che il gruppo ha gia votato. Aggiungerne uno lo '
-                    'mette in visione.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+        return DecoratedBox(
+          decoration: const BoxDecoration(
+            color: ArColors.containerHigh,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(ArRadii.sheet)),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  page.left,
+                  ArSpace.md,
+                  page.right,
+                  ArSpace.md,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Aggiungi dalla classifica',
+                      style: theme.textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: ArSpace.xxs),
+                    Text(
+                      'Gli anime che il gruppo ha gia votato. Aggiungerne uno lo '
+                      'mette in visione.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ArColors.textMid,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ranking.when(
+                  // Scheletro di righe, non girone: la lista e' di una riga
+                  // sola con due pezzi di testo, e uno scheletro a cassettoni
+                  // farebbe saltare il foglio al primo arrivo dei dati.
+                  loading: () => ListView.builder(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: page.left,
+                      vertical: ArSpace.xs,
+                    ),
+                    itemCount: 7,
+                    itemBuilder: (context, _) => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: ArSpace.xs),
+                      child: Row(
+                        children: [
+                          SkeletonBox(width: 40, height: 40, radius: ArRadii.chip),
+                          SizedBox(width: ArSpace.sm),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SkeletonBox(height: 14),
+                                SizedBox(height: ArSpace.xs),
+                                SkeletonBox(height: 11, width: 90),
+                              ],
+                            ),
+                          ),
+                          SizedBox(width: ArSpace.sm),
+                          SkeletonBox(width: 32, height: 32, radius: ArRadii.chip),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ranking.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => _ErrorState(
-                  message: '$error',
-                  onRetry: () =>
-                      ref.read(rankingProvider(widget.groupId).notifier).refresh(),
-                ),
-                data: (rows) {
-                  if (rows.isEmpty) {
-                    return const _EmptyState(
-                      message: 'La classifica del gruppo e vuota.',
-                      hint: 'Servono anime votati prima di poterli aggiungere.',
-                    );
-                  }
-
-                  return ListView.builder(
-                    controller: scrollController,
-                    itemCount: rows.length,
-                    itemBuilder: (context, i) {
-                      final row = rows[i];
-                      final already = existing.contains(row.animeId) || _added.contains(row.animeId);
-
-                      return ListTile(
-                        leading: AnimeThumb(url: row.imageUrl, title: row.title),
-                        title: Text(row.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text('#${row.position} · ${row.meanScoreLabel ?? '-'}'),
-                        trailing: already
-                            ? const Icon(Icons.check_circle, color: ArColors.completed)
-                            : IconButton(
-                                tooltip: 'Aggiungi ${row.title}',
-                                icon: const Icon(Icons.add_circle_outline),
-                                onPressed: () => _add(row.animeId, row.title),
-                              ),
+                  error: (error, _) => ErrorState(
+                    message: '$error',
+                    onRetry: () =>
+                        ref.read(rankingProvider(widget.groupId).notifier).refresh(),
+                  ),
+                  data: (rows) {
+                    if (rows.isEmpty) {
+                      return const EmptyState(
+                        icon: Icons.leaderboard_outlined,
+                        title: 'La classifica del gruppo e vuota.',
+                        message: 'Servono anime votati prima di poterli aggiungere.',
                       );
-                    },
-                  );
-                },
+                    }
+
+                    return ListView.builder(
+                      controller: scrollController,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: page.left,
+                        vertical: ArSpace.xs,
+                      ),
+                      itemCount: rows.length,
+                      itemBuilder: (context, i) {
+                        final row = rows[i];
+                        final already = existing.contains(row.animeId) ||
+                            _added.contains(row.animeId);
+
+                        return ListTile(
+                          leading: AnimeThumb(url: row.imageUrl, title: row.title),
+                          title: Text(
+                            row.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text('#${row.position} · ${row.meanScoreLabel ?? '-'}'),
+                          trailing: already
+                              ? const Icon(Icons.check_circle, color: ArColors.completed)
+                              : IconButton(
+                                  tooltip: 'Aggiungi ${row.title}',
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  onPressed: () => _add(row.animeId, row.title),
+                                ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -1133,66 +1436,5 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
     } on WatchlistFailure catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message, required this.hint});
-
-  final String message;
-  final String hint;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.bookmark_border, size: 48, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(height: 12),
-            Text(message, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              hint,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, required this.onRetry});
-
-  final String message;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AuthErrorBanner.error(message),
-              const SizedBox(height: 16),
-              FilledButton.tonal(onPressed: onRetry, child: const Text('Riprova')),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }

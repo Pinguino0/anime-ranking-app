@@ -11,6 +11,7 @@ import '../../features/anime/presentation/screens/anime_detail_screen.dart';
 import '../../features/anime/presentation/screens/anime_search_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/duels/presentation/screens/duels_screen.dart';
+import '../../features/episodes/presentation/screens/episode_screen.dart';
 import '../../features/groups/presentation/screens/create_group_screen.dart';
 import '../../features/groups/presentation/screens/group_detail_screen.dart';
 import '../../features/groups/presentation/screens/group_members_screen.dart';
@@ -113,6 +114,23 @@ class AppRoutes {
   /// risultato di ricerca che ha gia' l'opera in mano. Un id nel percorso
   /// suggerirebbe che la pagina si possa ricaricare da sola, e non si puo'.
   static const String animeDetail = '/anime/detail';
+
+  /// Visione di un episodio.
+  ///
+  /// Sotto [animeSearch] e non sotto [animeDetail]: gli episodi sono legati
+  /// all'opera dal catalogo, non alla scheda, e perche' la lista si apra dal
+  /// pulsante "Guarda" della scheda senza passare da lei.
+  ///
+  /// L'id dell'opera e' nel percorso e non in `extra` perche' serve a ricaricare
+  /// l'elenco degli episodi: senza, la pagina si aprirebbe vuota e andrebbe a
+  /// testa indietro appena si cambia episodio. Il nome dell'opera invece
+  /// viaggia in `extra` — e' solo il titolo in alto, e deve poter mancare.
+  static String episode(String animeId, String episodeId) =>
+      '$animeSearch/$animeId/episode/$episodeId';
+
+  /// Visione dell'opera con il primo episodio, dalla scheda anime.
+  static String firstEpisode(String animeId) =>
+      '$animeSearch/$animeId/episode';
 
   /// Rotte raggiungibili senza sessione.
   static const Set<String> public = {login, register};
@@ -283,6 +301,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 ),
               );
             },
+          ),
+          GoRoute(
+            path: ':animeId/episode/:episodeId',
+            builder: (context, state) => EpisodeScreen(
+              animeId: state.pathParameters['animeId']!,
+              episodeId: state.pathParameters['episodeId']!,
+              animeTitle: state.extra as String?,
+            ),
+          ),
+          // Stessa pagina senza episodio scelto: e' la porta d'ingresso dalla
+          // scheda dell'opera, dove l'utente ha premuto "Guarda" senza sapere
+          // quale episodio esiste. La schermata allora apre il primo
+          // disponibile, che di solito e' quello che voleva.
+          GoRoute(
+            path: ':animeId/episode',
+            builder: (context, state) => EpisodeScreen(
+              animeId: state.pathParameters['animeId']!,
+              animeTitle: state.extra as String?,
+            ),
           ),
         ],
       ),

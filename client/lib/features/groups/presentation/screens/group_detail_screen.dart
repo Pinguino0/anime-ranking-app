@@ -5,16 +5,29 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/error/app_failure.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/ui/code_text.dart';
+import '../../../../core/ui/content_row.dart';
+import '../../../../core/ui/section_header.dart';
+import '../../../../core/ui/transitions.dart';
+import '../../../profile/presentation/widgets/avatar.dart';
 import '../../domain/group.dart';
 import '../groups_controller.dart';
 import 'group_invites_section.dart';
+// `GroupRoleBadge` vive nella lista dei gruppi: il contrassegno del ruolo e'
+// lo stesso in elenco e in dettaglio, e due copie finirebbero con colori
+// diversi per lo stesso admin.
+import 'groups_list_screen.dart';
 
 /// Dettaglio di un gruppo: codice invito e amministrazione.
 ///
 /// Il gruppo si legge dalla lista gia' caricata invece di chiedere di nuovo il
 /// server: evita una seconda richiesta a ogni apertura e fa funzionare la
 /// schermata anche con la rete lenta. Se il gruppo non e' in lista significa
-/// che non si e' membri, e questo si dice subito.
+/// che non si e' membri, e questo si dice subito — ma solo se la lista e'
+/// arrivata davvero: quando la richiesta e' fallita la lista e' vuota anche se
+/// l'utente e' membro, e dirgli "non sei membro" sarebbe un'affermazione
+/// falsa su un errore di rete.
 class GroupDetailScreen extends ConsumerWidget {
   const GroupDetailScreen({required this.groupId, super.key});
 
@@ -22,39 +35,94 @@ class GroupDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final groups = ref.watch(groupsListProvider).value ?? const <AnimeGroup>[];
+    // Un solo `watch`: la versione precedente ne faceva due, e la seconda
+    // lettura poteva cadere su uno stato diverso della prima, cosi' la schermata
+    // decideva cosa mostrare in base a dati che non avevano niente a che fare
+    // fra loro.
+    final state = ref.watch(groupsListProvider);
+    final groups = state.value ?? const <AnimeGroup>[];
     final matches = groups.where((g) => g.id == groupId).toList();
 
-    if (groups.isEmpty && ref.watch(groupsListProvider).isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    if (matches.isNotEmpty) return _Detail(group: matches.first);
 
-    if (matches.isEmpty) {
+    // Tre casi distinti e non uno solo "manca il gruppo": in caricamento non si
+    // sa ancora, in errore si sa che il tentativo e' fallito, e solo nei dati
+    // arrivati vuoti si puo' dire che non si e' membri.
+    if (state.hasError) {
       return Scaffold(
         appBar: AppBar(title: const Text('Gruppo')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Non sei membro di questo gruppo.',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 16),
-                FilledButton.tonal(
-                  onPressed: () => context.go('/groups'),
-                  child: const Text('Torna ai miei gruppi'),
-                ),
-              ],
-            ),
-          ),
+        body: ErrorState(
+          message: state.error is GroupsFailure
+              ? (state.error! as GroupsFailure).message
+              : 'Gruppo non disponibile.',
+          onRetry: () => ref.read(groupsListProvider.notifier).refresh(),
         ),
       );
     }
 
-    return _Detail(group: matches.first);
+    if (state.isLoading) {
+      return const Scaffold(
+        appBar: _DetailTitle(),
+        body: _DetailSkeleton(),
+      );
+    }
+
+    return Scaffold(
+      appBar: const _DetailTitle(),
+      body: EmptyState(
+        icon: Icons.group_off_outlined,
+        title: 'Non sei membro di questo gruppo.',
+        message:
+            'Puo\' succedere che il gruppo sia stato cancellato, che tu ne sia '
+            'stato espulso, che il collegamento sia di un altro account.',
+        action: FilledButton.icon(
+          onPressed: () => context.go('/groups'),
+          icon: const Icon(Icons.arrow_back, size: 19),
+          label: const Text('Torna ai miei gruppi'),
+        ),
+      ),
+    );
+  }
+}
+
+/// Titolo dell'appbar.
+///
+/// Un campo `const` perche' la schermata lo usa identico nei tre casi di
+/// caricamento, errore e assenza: scriverlo ogni volta significava tre copie
+/// che potevano divergere nel titolo mentre la pagina restava identica.
+class _DetailTitle extends StatelessWidget implements PreferredSizeWidget {
+  const _DetailTitle();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) => AppBar(title: const Text('Gruppo'));
+}
+
+/// Scheletro del dettaglio.
+///
+/// Se stessa forma della pagina reale — cinque card, il codice, il ruolo — cosi'
+/// all'arrivo dei dati niente salta da una parte all'altra dello schermo.
+class _DetailSkeleton extends StatelessWidget {
+  const _DetailSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: ArSpace.page(context).copyWith(top: ArSpace.md, bottom: 0),
+      children: [
+        for (var i = 0; i < 5; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: ArSpace.sm),
+            child: SkeletonBox(height: 74, radius: ArRadii.card),
+          ),
+        const SizedBox(height: ArSpace.lg),
+        const SkeletonBox(height: 140, radius: ArRadii.card),
+        const SizedBox(height: ArSpace.lg),
+        const SkeletonBox(height: 70, radius: ArRadii.card),
+      ],
+    );
   }
 }
 
@@ -215,61 +283,77 @@ class _DetailState extends ConsumerState<_Detail> {
     final theme = Theme.of(context);
     final group = widget.group;
 
+    final page = ArSpace.page(context);
+
     return Scaffold(
-      appBar: AppBar(title: Text(group.name)),
+      appBar: AppBar(
+        title: Text(group.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        // Il padding in fondo e' il doppio del normale perche' l'ultimo
+        // pulsante e' quello che lascia il gruppo: su uno schermo basso finiva
+        // sotto la barra di navigazione e l'unica azione distruttiva della
+        // pagina era quella che non si poteva premere.
+        padding: page.copyWith(
+          top: ArSpace.md,
+          bottom: ArSpace.xxl * 2,
+        ),
         children: [
           if (group.description?.isNotEmpty == true) ...[
             Text(group.description!, style: theme.textTheme.bodyLarge),
-            const SizedBox(height: 24),
+            const SizedBox(height: ArSpace.lg),
           ],
 
-          // Le tre sezioni stanno in cima perche' sono quello che si va a
-          // vedere nel gruppo: sotto il codice invito e il ruolo, che sono
+          // Le sezioni del gruppo stanno in cima perche' sono quello che si va
+          // a vedere nel gruppo: sotto il codice invito e il ruolo, che sono
           // informazioni di amministrazione, l'utente dovrebbe scorrerle per
           // trovarle.
-          _LinkCard(
-            icon: Icons.leaderboard_outlined,
-            title: 'Classifica',
-            subtitle: 'I titoli piu amati dal gruppo e le tue posizioni.',
-            onTap: () =>
-                context.push(AppRoutes.ranking(group.id), extra: group.name),
+          _LinkGrid(
+            links: [
+              _Link(
+                icon: Icons.leaderboard_outlined,
+                title: 'Classifica',
+                subtitle: 'I titoli piu amati dal gruppo e le tue posizioni.',
+                onTap: () => context.push(
+                  AppRoutes.ranking(group.id),
+                  extra: group.name,
+                ),
+              ),
+              _Link(
+                icon: Icons.compare_arrows,
+                title: 'Duelli',
+                subtitle: 'Metti in gara due anime e guarda chi vince.',
+                onTap: () =>
+                    context.push(AppRoutes.duels(group.id), extra: group.name),
+              ),
+              _Link(
+                icon: Icons.emoji_events_outlined,
+                title: 'Tornei',
+                subtitle:
+                    'Un tabellone a eliminazione diretta fra anime del gruppo.',
+                onTap: () => context.push(
+                  AppRoutes.tournaments(group.id),
+                  extra: group.name,
+                ),
+              ),
+              _Link(
+                icon: Icons.bookmark_border,
+                title: 'Watchlist',
+                subtitle: 'Gli anime che stai guardando e quelli da iniziare.',
+                onTap: () => context.push(
+                  AppRoutes.watchlist(group.id),
+                  extra: group.name,
+                ),
+              ),
+              _Link(
+                icon: Icons.group_outlined,
+                title: 'Membri',
+                subtitle: 'Chi partecipa al gruppo e i suoi ruoli.',
+                onTap: () => context.push(AppRoutes.groupMembers(group.id)),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          _LinkCard(
-            icon: Icons.compare_arrows,
-            title: 'Duelli',
-            subtitle: 'Metti in gara due anime e guarda chi vince.',
-            onTap: () =>
-                context.push(AppRoutes.duels(group.id), extra: group.name),
-          ),
-          const SizedBox(height: 12),
-          _LinkCard(
-            icon: Icons.emoji_events_outlined,
-            title: 'Tornei',
-            subtitle:
-                'Un tabellone a eliminazione diretta fra anime del gruppo.',
-            onTap: () => context.push(
-              AppRoutes.tournaments(group.id),
-              extra: group.name,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _LinkCard(
-            icon: Icons.bookmark_border,
-            title: 'Watchlist',
-            subtitle: 'Gli anime che stai guardando e quelli da iniziare.',
-            onTap: () =>
-                context.push(AppRoutes.watchlist(group.id), extra: group.name),
-          ),
-          _LinkCard(
-            icon: Icons.group_outlined,
-            title: 'Membri',
-            subtitle: 'Chi partecipa al gruppo e i suoi ruoli.',
-            onTap: () => context.push(AppRoutes.groupMembers(group.id)),
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: ArSpace.lg),
 
           if (group.canSeeInviteCode) ...[
             _InviteCard(
@@ -277,7 +361,7 @@ class _DetailState extends ConsumerState<_Detail> {
               busy: _busy,
               onRegenerate: _regenerate,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: ArSpace.lg),
 
             // Gli inviti singoli stanno sotto il codice del gruppo, non
             // accanto: il codice e' l'accesso permanente del gruppo, gli inviti
@@ -285,35 +369,12 @@ class _DetailState extends ConsumerState<_Detail> {
             // arriva al caso comune per primo e trova il caso particolare
             // sotto, senza dover scegliere quale delle due cose cercare.
             GroupInvitesSection(groupId: group.id),
-            const SizedBox(height: 24),
+            const SizedBox(height: ArSpace.lg),
           ],
 
-          Text('Il tuo ruolo', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Text(
-            group.myRole.label,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: group.myRole.canManage
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            switch (group.myRole) {
-              GroupRole.owner =>
-                'Puoi amministrare il gruppo e gestire i ruoli.',
-              GroupRole.admin =>
-                'Puoi amministrare il gruppo ed espellere i membri.',
-              GroupRole.member =>
-                'Puoi votare e commentare. Chiedi a un admin per altro.',
-            },
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
+          _RolePanel(role: group.myRole),
+          const SizedBox(height: ArSpace.xl),
 
-          const SizedBox(height: 32),
           if (!group.isOwner)
             OutlinedButton.icon(
               onPressed: _busy ? null : _leave,
@@ -326,7 +387,7 @@ class _DetailState extends ConsumerState<_Detail> {
               icon: const Icon(Icons.swap_horiz),
               label: const Text('Cedi la proprieta'),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: ArSpace.sm),
             Text(
               'Sei l owner: per lasciare il gruppo devi prima cedere la '
               'proprieta\' o eliminarlo.',
@@ -337,6 +398,59 @@ class _DetailState extends ConsumerState<_Detail> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Una sezione del gruppo, pronta per la griglia delle card.
+class _Link {
+  const _Link({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+}
+
+/// Elenco delle sezioni del gruppo.
+///
+/// Le card si mettono in colonna per costruzione e non per caso: ognuna e' un
+/// elemento della stessa lista, quindi lo spazio fra una e l'altra lo mette il
+/// ciclo e non la carta successiva. Scriverlo a mano sotto ogni card — come
+/// faceva la versione precedente — aveva gia' fatto dimenticare una volta lo
+/// spazio, e la quinta card risultava attaccata alla quarta.
+///
+/// Resta una sola colonna anche sui schermi larghi: sono cinque voci con
+/// sottotitoli lunghi, e affiancarle significherebbe testi che si spezzano
+/// su tre righe per guadagnare poco — la larghezza che avanza viene usata
+/// meglio limitando la colonna del testo.
+class _LinkGrid extends StatelessWidget {
+  const _LinkGrid({required this.links});
+
+  final List<_Link> links;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (index, link) in links.indexed) ...[
+          if (index > 0) const SizedBox(height: ArSpace.sm),
+          ArReveal(
+            // L'ingresso a ondate dice "sono stati caricati": le cinque card
+            // senza animazione arriverebbero insieme e sembrerebbero disegnate a
+            // caso. Il ritardo si ferma a 240ms perche' oltre l'ultima card
+            // aspetterebbe senza che l'occhio capisse perche'.
+            delayMs: (index * 45).clamp(0, 240),
+            child: _LinkCard(link: link),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -364,19 +478,22 @@ class _NewOwnerSheet extends ConsumerWidget {
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(ArSpace.md),
         child: SizedBox(
+          // Altezza fissa e non "il piu' che ci sta": il foglio deve poter
+          // scorrere i membri anche su uno schermo basso, e una lista che si
+          // adatta al foglio mostrerebbe due righe e un bordo tagliato.
           height: 420,
           child: members.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () => _MembersSkeleton(),
             error: (error, _) => Center(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(ArSpace.lg),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('$error', textAlign: TextAlign.center),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: ArSpace.sm),
                     OutlinedButton(
                       onPressed: () =>
                           ref.invalidate(groupMembersProvider(groupId)),
@@ -395,7 +512,7 @@ class _NewOwnerSheet extends ConsumerWidget {
               if (candidates.isEmpty) {
                 return Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(ArSpace.lg),
                     child: Text(
                       'Sei l unico membro: non c\'e nessuno a cui cedere la '
                       'proprieta\'.',
@@ -413,28 +530,34 @@ class _NewOwnerSheet extends ConsumerWidget {
                     'Cedi la proprieta\' a',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: ArSpace.xxs),
                   Text(
                     'Chi scegli diventa owner e puo\' eliminare il gruppo.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: ArSpace.sm),
                   Expanded(
                     child: ListView.builder(
                       itemCount: candidates.length,
                       itemBuilder: (context, i) {
                         final member = candidates[i];
 
+                        // `ProfileAvatar` e non `CircleAvatar` con
+                        // `NetworkImage`: senza `errorBuilder` un URL avatar
+                        // rotto mostrerebbe il riquadro grigio di Flutter,
+                        // mentre questo cade sull'iniziale, che dice comunque
+                        // di chi si tratta.
                         return ListTile(
-                          leading: member.avatarUrl == null
-                              ? CircleAvatar(child: Text(_initial(member)))
-                              : CircleAvatar(
-                                  backgroundImage: NetworkImage(
-                                    member.avatarUrl!,
-                                  ),
-                                ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: ArSpace.xs,
+                          ),
+                          leading: ProfileAvatar(
+                            url: member.avatarUrl,
+                            fallbackText: avatarInitial(member.label),
+                            size: 40,
+                          ),
                           title: Text(member.label),
                           subtitle: Text(member.role.label),
                           trailing: const Icon(Icons.chevron_right),
@@ -457,68 +580,164 @@ class _NewOwnerSheet extends ConsumerWidget {
       ),
     );
   }
+}
 
-  /// Prima lettera del nome, per l'avatar di fallback.
-  ///
-  /// Con stringa vuota restituirebbe un char vuoto e l'avatar sembrerebbe
-  /// rotto; qui si lascia il segnaposto dell'icona.
-  String _initial(GroupMember member) {
-    final label = member.label.trim();
-    return label.isEmpty ? '?' : label[0].toUpperCase();
+/// Scheletro della lista dei membri nel foglio.
+///
+/// Stesse righe della lista reale: uno scheletro fatto di righe generiche
+/// cambierebbe altezza al primo arrivo dei dati e la lista salterebbe sotto
+/// le dita di chi stava gia' per premere.
+class _MembersSkeleton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      itemCount: 5,
+      itemBuilder: (_, i) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: ArSpace.sm),
+        child: Row(
+          children: [
+            const SkeletonBox(height: 40, width: 40, radius: 40),
+            const SizedBox(width: ArSpace.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonBox(width: 140 - i * 12, height: 14),
+                  const SizedBox(height: ArSpace.xs),
+                  const SkeletonBox(width: 60, height: 12),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
 /// Scheda che apre una sezione del gruppo.
 ///
-/// Comune a classifica e watchlist: le due hanno lo stesso aspetto e la sola
-/// differenza e' la destinazione, quindi due copie significherebbero che un
-/// ritocco al suono del tocco o al padding ne lascerebbe sempre una indietro.
+/// Comune a classifica, duelli, tornei, watchlist e membri: hanno lo stesso
+/// aspetto e la sola differenza e' la destinazione, quindi due copie
+/// significherebbero che un ritocco al suono del tocco o al padding ne
+/// lascerebbe sempre una indietro.
+///
+/// L'icona sta in un riquadro arrotondato invece che flottere da sola: e' il
+/// modo piu' economico di dire "questa scheda si apre" senza dover aggiungere
+/// un bordo alla card, che su fondo scuro si perde.
 class _LinkCard extends StatelessWidget {
-  const _LinkCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
+  const _LinkCard({required this.link});
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
+  final _Link link;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
-    return Card(
+    final card = Card(
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(icon, color: theme.colorScheme.primary),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(title, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+      child: Padding(
+        padding: const EdgeInsets.all(ArSpace.md),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(ArRadii.control),
+                border: Border.all(
+                  color: scheme.primary.withValues(alpha: 0.25),
                 ),
               ),
-              const Icon(Icons.chevron_right),
-            ],
-          ),
+              child: Icon(link.icon, color: scheme.primary, size: 22),
+            ),
+            const SizedBox(width: ArSpace.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(link.title, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: ArSpace.xxs),
+                  Text(
+                    link.subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: ArSpace.sm),
+            Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+
+    return ArPressable(onTap: link.onTap, child: card);
+  }
+}
+
+/// Riquadro con il ruolo dell'utente nel gruppo.
+///
+/// Il ruolo non e' una riga di testo ma un dato che cambia quello che si puo'
+/// fare: sta in una card con il riquadro colorato perche' e' l'informazione
+/// che spiega perche' alcuni pulsanti ci sono e altri no, e sta in fondo
+/// perché la si cerca quando qualcosa non si puo' fare, non all'inizio.
+class _RolePanel extends StatelessWidget {
+  const _RolePanel({required this.role});
+
+  final GroupRole role;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = role.canManage
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurfaceVariant;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(ArSpace.md),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  MetricLabel('Il tuo ruolo'),
+                  const SizedBox(height: ArSpace.xs),
+                  GroupRoleBadge(role: role),
+                  const SizedBox(height: ArSpace.xs),
+                  Text(
+                    switch (role) {
+                      GroupRole.owner =>
+                        'Puoi amministrare il gruppo e gestire i ruoli.',
+                      GroupRole.admin =>
+                        'Puoi amministrare il gruppo ed espellere i membri.',
+                      GroupRole.member =>
+                        'Puoi votare e commentare. Chiedi a un admin per altro.',
+                    },
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // L'icona distingue a colpo d'occhio il ruolo con poteri da quello
+            // senza: e' l'unica differenza visiva che non si perde quando il
+            // testo e' letto di fretta.
+            Icon(
+              role.canManage ? Icons.shield_outlined : Icons.person_outline,
+              color: color,
+            ),
+          ],
         ),
       ),
     );
@@ -539,30 +758,22 @@ class _InviteCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(ArSpace.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Codice invito', style: theme.textTheme.titleSmall),
-            const SizedBox(height: 8),
-            // Monospaziato e spaziato fra i caratteri: il codice va letto ad
-            // alta voce o digitato a mano, e O/0 e I/1 si confondono in un
-            // font proporzionale.
-            Text(
-              code,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontFamily: 'monospace',
-                letterSpacing: 2,
-              ),
-            ),
-            const SizedBox(height: 12),
+            const MetricLabel('Codice invito'),
+            const SizedBox(height: ArSpace.xs),
+            // Il carattere del font e la spaziatura li decide `ArCodeText`:
+            // il codice va letto ad alta voce o digitato a mano, e da vicino
+            // un font proporzionale fa scambiare O da 0 e I da 1.
+            ArCodeText(code, large: true),
+            const SizedBox(height: ArSpace.sm),
             Wrap(
-              spacing: 12,
-              runSpacing: 8,
+              spacing: ArSpace.sm,
+              runSpacing: ArSpace.xs,
               children: [
                 OutlinedButton.icon(
                   onPressed: code.isEmpty ? null : () => _copy(context),
@@ -587,7 +798,7 @@ class _InviteCard extends StatelessWidget {
     await Clipboard.setData(ClipboardData(text: code));
 
     // Conferma esplicita: senza, l'utente non ha modo di sapere se il
-    // copia-in-clipboard e andato, e potrebbe ripeterlo o incollare il vecchio.
+    // copia-in-clipboard e' andato, e potrebbe ripeterlo o incollare il vecchio.
     messenger.showSnackBar(const SnackBar(content: Text('Codice copiato.')));
   }
 }
