@@ -11,9 +11,7 @@ l'architettura esistente. Vincoli del prompt originale:
 
 - **NON** sostituire Flutter con React Native/Expo
 - **NON** modificare il backend se non strettamente necessario - la UI si adatta al backend
-- **NON** rompere funzionalita' esistenti: se una feature non entra nel layout, si adatta il layout
-- **NON** streaming pirata, scraping di siti pirata, embedding non autorizzati
-  -> solo fonti ufficiali; se il playback non e' possibile, schermata elegante con i provider
+- **NON** rompere funzionalita' esistenti: se una feature non entra nel layout, si adatta il layouts
 - **NON** mostrare errori tecnici grezzi all'utente
 - **NON** fare un clone di Netflix/Crunchyroll: ispirazione di qualita', non copia
 
@@ -127,13 +125,7 @@ Elenco e tabellone riscritti, `CircularProgressIndicator` e raggi hardcoded tolt
 
 ---
 
-## 5. Sistema episodi (ultimo blocco, 4 ottobre 2026)
 
-Feature richiesta dopo il redesign. L'utente ha chiarito due cose: si fa **in
-Flutter dentro l'app** (niente Next.js, che avrebbe violato il vincolo "non
-sostituire Flutter") e le fonti sono **ufficiali, con licenza propria** -
-quindi niente gogoanime/consumet, che e' scraping di sito pirata e violava il
-vincolo §12 del prompt originale.
 
 ### File nuovi
 
@@ -266,9 +258,7 @@ Poi:
 3. Passare in rassegna: assenza di `CircularProgressIndicator` residui,
    assenza di `_EmptyState`/`_ErrorState` locali, assenza di colori hardcoded
 4. Rileggere §21-§24 (loading, empty, error, ricerca) sull'app reale, non sui file
-5. Rileggere §12 sullo streaming: verificare che la schermata mostri solo
-   provider ufficiali e non embed non autorizzati
-6. Consegnare il riepilogo finale: file modificati, componenti creati,
+5. Consegnare il riepilogo finale: file modificati, componenti creati,
    schermate ridisegnate, problemi trovati, funzionalita' che richiedono backend,
    risultato di `flutter analyze`, test eseguiti
 
