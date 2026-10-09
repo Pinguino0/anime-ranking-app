@@ -59,3 +59,27 @@ temp/
 
 # I font de Google Fonts sono dentro `client/assets/fonts` e vanno versionati:
 # senza, la build su un'altra macchina uscirebbe con i font di sistema.
+
+# ---- Screenshot e log di sessione ----
+# Gli screenshot adb servono a guardare l'app mentre si sviluppa: sono
+# immagini di una versione precisa, non documentazione, e invecchiano senza
+# avvisare. build/ e' quello di root (quello dentro client/ e' gia' coperto
+# dalla regola client/build/ piu' sopra).
+build/
+# Il log di `flutter run` e' testo di Terminale, non un file di progetto.
+client/buildapp_log.txt
+
+# ---- Residui di un tentativo Next.js ----
+# RESUME.md dice perche' il progetto e' Flutter e Next.js era escluso dal
+# vincolo. Se questi file ricompaiono sono un'altra implementazione parallela,
+# non una parte dell'app: nessuna rota li importa, e package-lock.json vuoto
+# senza package.json non e' nemmeno un progetto installabile.
+/components/
+/hooks/
+/pages/
+/package-lock.json
+
+# ---- Scraper Node ----
+# node_modules dello scraper: ricreabile con `npm install` in scraper/, non va
+# versionato. Gli script (animeunity.js, seed/*.js) invece servono alla CI.
+scraper/node_modules/
