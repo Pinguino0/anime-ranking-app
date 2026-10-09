@@ -1,4 +1,5 @@
 name: AnimeUnity sitemap-diff (settimanale)
+run-name: sitemap-diff AnimeUnity
 
 # Scarica la sitemap di AnimeUnity e, facendo il diff con gli id gia' presenti in
 # `provider_anime_index`, importa SOLO i record nuovi. `harvest_animeunity.js`
