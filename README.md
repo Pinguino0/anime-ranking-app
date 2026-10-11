@@ -45,7 +45,7 @@ Netflix e senza fingere di essere uno streaming con licenza.
 | 🏆 | **Classifica** | Podio e punteggi dei membri, con statistiche animate |
 | ⚔️ | **Duelli** | Confronti uno-contro-uno tra anime |
 | 🥇 | **Tornei** | Tabelloni a eliminazione tra i titoli del gruppo |
-| 🔔 | **Notifiche** | Push (anche ad app chiusa) e centro attività |
+| 🔔 | **Notifiche** | Push (anche ad app chiusa, max 3 al giorno per dispositivo) e centro attività |
 | 🎖️ | **Achievements** | Obiettivi sbloccabili mentre guardi |
 
 ---

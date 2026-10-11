@@ -68,7 +68,7 @@ Il **push è completo: server e client**. Non devi fare più niente in Firebase.
   e `20261011190000_device_token_rpc.sql` **applicate**.
 - **Edge Function `send-push`** — deployata, `health` risponde **`ok`**
   (`serviceAccount: true`, `webhookSecret: true`, progetto `animerank-4b0e2`).
-  12 test Deno verdi.
+  12 test Deno verdi → **14** con il limite giornaliero.
 - **Segreti caricati** — `FIREBASE_SERVICE_ACCOUNT` (dal tuo JSON) e
   `PUSH_WEBHOOK_SECRET`.
 - **Collaudo end-to-end** — inserita una notifica di prova con un token finto:
@@ -99,6 +99,28 @@ Il **push è completo: server e client**. Non devi fare più niente in Firebase.
   arrivano.
 
 
+
+---
+
+## Limite giornaliero (3 push al giorno per dispositivo)
+
+Un dispositivo non riceve più di **3 push al giorno**. Il tetto è per
+*dispositivo* (token), non per utente: telefono e tablet hanno ciascuno i propri
+3. Non si applica alle notifiche in-app: quando una push viene fermata, la riga
+in `notifications` resta e l'utente la vede aprendo l'app.
+
+- **Dove sta il conteggio** — due colonne su `device_tokens`: `push_count` e
+  `push_date` (giorno **UTC**). Si azzera da solo quando cambia il giorno.
+- **Chi decide** — la RPC `reserve_push_slot(token, limit)`, chiamata dalla Edge
+  Function **prima** di ogni invio. Il controllo sta dentro l'`UPDATE`, quindi due
+  notifiche scritte nello stesso istante non possono sforare il tetto.
+- **Cambiare il limite** — imposta il segreto `PUSH_DAILY_LIMIT` della funzione
+  (`supabase secrets set PUSH_DAILY_LIMIT=5`); senza segreto vale 3. Un valore
+  assente o non numerico ricade su 3, non blocca i push.
+- **Vale per tutti i tipi**, `app_update` compreso.
+
+Migrazione `20261011203000_push_daily_limit.sql` **applicata**; `health` riporta
+`dailyLimit: 3`.
 
 ---
 

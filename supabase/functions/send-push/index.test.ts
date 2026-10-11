@@ -24,6 +24,7 @@ import {
   buildMessage,
   displayText,
   handleRequest,
+  parseDailyLimit,
   parseServiceAccount,
   pemToPkcs8,
   readNotification,
@@ -176,4 +177,20 @@ Deno.test('un metodo non POST viene rifiutato', async () => {
     new Request('https://example.com/send-push', { method: 'GET' }),
   )
   assertEquals(response.status, 405)
+})
+
+Deno.test('parseDailyLimit ricade su 3 con un valore assente o non numerico', () => {
+  // Un errore di configurazione non deve spegnere le push: meglio il default
+  // (3) che un tetto a zero che le bloccherebbe tutte.
+  assertEquals(parseDailyLimit(''), 3)
+  assertEquals(parseDailyLimit('   '), 3)
+  assertEquals(parseDailyLimit('tre'), 3)
+  assertEquals(parseDailyLimit('-1'), 3)
+})
+
+Deno.test('parseDailyLimit accetta un limite valido, zero compreso', () => {
+  assertEquals(parseDailyLimit('3'), 3)
+  assertEquals(parseDailyLimit(' 5 '), 5)
+  // 0 e' un valore legittimo: nessuna push al giorno.
+  assertEquals(parseDailyLimit('0'), 0)
 })

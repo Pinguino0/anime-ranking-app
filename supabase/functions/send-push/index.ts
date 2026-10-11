@@ -26,6 +26,18 @@
 // riceve: la riga dice `user_id`. Non scrive notifiche: le legge e le spedisce.
 // Un push che fallisce non tocca la notifica in-app, che resta li' comunque.
 //
+// Limite giornaliero per dispositivo
+// ----------------------------------
+// Un dispositivo non riceve piu' di `PUSH_DAILY_LIMIT` push al giorno (default
+// 3). Il conteggio vive su `device_tokens` (`push_count`/`push_date`) e lo
+// prenota la RPC `reserve_push_slot` *prima* di ogni invio: due notifiche scritte
+// nello stesso istante non possono sforare il tetto, perche' il controllo sta
+// dentro l'UPDATE (vedi 20261011203000_push_daily_limit.sql).
+//
+// Il limite riguarda gli avvisi *sul dispositivo*, non il centro notifiche:
+// quando una push viene fermata, la riga in `notifications` resta e l'utente la
+// vede aprendo l'app. Vale per tutti i tipi, `app_update` compreso.
+//
 // Rotte
 // -----
 //   POST /            webhook standard di Supabase
@@ -65,6 +77,21 @@ const WEBHOOK_SECRET = Deno.env.get('PUSH_WEBHOOK_SECRET') ?? ''
 // combaciare con quello registrato in `flutter_local_notifications`; se non
 // esiste, Android mostra l'avviso con il canale di default del sistema.
 const ANDROID_CHANNEL_ID = 'animerank_default'
+
+/**
+ * Quante push al giorno puo' ricevere un singolo dispositivo.
+ *
+ * Modificabile dal segreto `PUSH_DAILY_LIMIT` della funzione; senza segreto vale
+ * 3. Un valore assente o non numerico ricade sul default invece di bloccare i
+ * push per sempre: un errore di configurazione non deve spegnere le notifiche.
+ */
+export function parseDailyLimit(raw: string): number {
+  const value = Number.parseInt(raw.trim(), 10)
+  if (!Number.isFinite(value) || value < 0) return 3
+  return value
+}
+
+const DAILY_LIMIT = parseDailyLimit(Deno.env.get('PUSH_DAILY_LIMIT') ?? '')
 
 type UntypedClient = SupabaseClient<any>
 
@@ -410,16 +437,25 @@ export async function sendPush(
   // Nessun dispositivo: non e' un errore. L'utente ha la notifica in-app e la
   // vedra' alla prossima apertura.
   if (tokens.length === 0) {
-    return { sent: 0, failed: 0, removed: 0, skipped: 'no_tokens' }
+    return { sent: 0, failed: 0, removed: 0, throttled: 0, limit: DAILY_LIMIT, skipped: 'no_tokens' }
   }
 
   const accessToken = await fetchAccessToken(account)
 
   let sent = 0
   let failed = 0
+  let throttled = 0
   const deadTokens: string[] = []
 
   for (const token of tokens) {
+    // Prenota lo slot PRIMA dell'invio: se il dispositivo ha gia' ricevuto
+    // `DAILY_LIMIT` push oggi, questa non parte. Lo slot si consuma anche se
+    // FCM poi rifiuta, cosi' un errore non apre la strada a una raffica.
+    if (!await reservePushSlot(client, token, DAILY_LIMIT)) {
+      throttled++
+      continue
+    }
+
     const outcome = await sendToToken(account.project_id, accessToken, token, notification)
     if (outcome.ok) {
       sent++
@@ -446,6 +482,8 @@ export async function sendPush(
     sent,
     failed,
     removed: deadTokens.length,
+    throttled,
+    limit: DAILY_LIMIT,
     project: account.project_id,
   }
 }
@@ -515,6 +553,7 @@ function health(): Record<string, unknown> {
     serviceAccount: FIREBASE_SERVICE_ACCOUNT !== '',
     webhookSecret: WEBHOOK_SECRET !== '',
     supabase: SUPABASE_URL !== '',
+    dailyLimit: DAILY_LIMIT,
   }
 }
 
