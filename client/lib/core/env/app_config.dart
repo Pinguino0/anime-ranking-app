@@ -24,13 +24,27 @@ class AppConfig {
     defaultValue: '',
   );
 
-  /// Nome dell'Edge Function che fa da proxy verso Jikan/MyAnimeList.
-  static const String jikanFunction = 'jikan-proxy';
+/// Nome dell'Edge Function che fa da proxy verso il catalogo esterno.
+  ///
+  /// Lo slug e' ancora `jikan-proxy` perche' Jikan e' stato dismesso il 1°
+  /// ottobre 2026 e la funzione non e' stata rinominata: dietro lo slug oggi
+  /// ci sono AniList e Kitsu. Il nome e' un indirizzo, non una descrizione, e
+  /// cambiarlo romperebbe il client gia' installato.
+  static const String catalogFunction = 'jikan-proxy';
 
-  /// Quanti giorni un anime puo restare in cache prima di essere ricaricato
-  /// dall'API esterna. Piu alto = meno chiamate a Jikan, dati piu' freschi
+  /// Nome dell'Edge Function che trasforma l'indirizzo canonico di una fonte
+  /// in un URL riproducibile.
+  ///
+  /// Va messa qui perche' lo slug e' l'unica cosa che collega il client alla
+  /// funzione, e una stringa scritta a mano dentro il repository e' il modo
+  /// piu' rapido di far scomparire "risoluzione non riuscita" senza che nessuno
+  /// capisca perche'.
+  static const String sourceResolverFunction = 'resolve-source';
+
+  /// Quanti giorni un anime puo' restare in cache prima di essere ricaricato
+  /// dall'API esterna. Piu' alto = meno chiamate fuori, dati piu' freschi
   /// richiedono piu' chiamate. 7 giorni e' un buon compromesso: i dati di
-  /// catalogo di MyAnimeList non cambiano ogni giorno.
+  /// catalogo non cambiano ogni giorno.
   static const int animeCacheDays = 7;
 
   /// Quanti risultati chiedere per pagina alla ricerca anime.

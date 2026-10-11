@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/error/app_failure.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/ui/ar_badge.dart';
 import '../../../../core/ui/code_text.dart';
 import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
@@ -641,17 +642,14 @@ class _LinkCard extends StatelessWidget {
         padding: const EdgeInsets.all(ArSpace.md),
         child: Row(
           children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(ArRadii.control),
-                border: Border.all(
-                  color: scheme.primary.withValues(alpha: 0.25),
-                ),
-              ),
-              child: Icon(link.icon, color: scheme.primary, size: 22),
+            // Il badge prende l'accento della sezione: dentro i gruppi e' il
+            // teal, quindi cinque schede identiche si leggono come "gruppo" e
+            // non come "un'altra schermata viola".
+            ArBadge(
+              icon: link.icon,
+              size: 42,
+              radius: ArRadii.control,
+              outline: true,
             ),
             const SizedBox(width: ArSpace.md),
             Expanded(

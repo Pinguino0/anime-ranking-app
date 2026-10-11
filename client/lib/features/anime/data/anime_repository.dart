@@ -15,11 +15,12 @@ import '../domain/anime.dart';
 ///
 ///  - [searchLocal] e [currentSeason] leggono il catalogo sul server. Sono
 ///    veloci e funzionano senza rete verso l'esterno. E' la via normale.
-///  - [searchRemote] chiama l'Edge Function, che interroga Jikan e scrive in
-///    catalogo. Serve quando la ricerca locale non trova niente.
+///  - [searchRemote] chiama l'Edge Function, che interroga il catalogo esterno
+///    (AniList, con Kitsu come secondo provider) e scrive in catalogo. Serve
+///    quando la ricerca locale non trova niente.
 ///
-/// Il client non interroga mai Jikan direttamente: la quota e' del progetto e
-/// un client che chiama a piacere la esaurisce per tutti gli utenti.
+/// Il client non interroga mai AniList o Kitsu direttamente: la quota e' del
+/// progetto e un client che chiama a piacere la esaurisce per tutti gli utenti.
 abstract interface class AnimeRepository {
   /// Cerca nel catalogo locale.
   ///
@@ -32,7 +33,8 @@ abstract interface class AnimeRepository {
     int offset,
   });
 
-  /// Cerca su Jikan passando dall'Edge Function, con scrittura in catalogo.
+  /// Cerca nel catalogo esterno passando dall'Edge Function, con scrittura in
+  /// catalogo.
   ///
   /// Restituisce i risultati anche se la cache non e' scrivibile: e' il
   /// fallback che permette di vedere qualcosa anche quando il database
@@ -53,6 +55,20 @@ abstract interface class AnimeRepository {
   /// Riepilogo del catalogo per la testata.
   Future<AnimeCatalogStats> stats();
 
+  /// Opere correlate (sequel, prequel, ...) di un anime.
+  ///
+  /// [animeId] e' l'id interno del catalogo: le relazioni si importano da
+  /// AniList per gli anime gia' in catalogo e si risolvono verso l'interno con
+  /// la RPC `anime_related`.
+  Future<List<RelatedAnime>> related(String animeId);
+
+  /// Ordine di visione consigliato per una saga.
+  ///
+  /// Restituisce l'intera catena prequel/sequel in ordine di uscita, con
+  /// `isStart` sulla prima opera. Vuoto o con una sola voce quando non c'e'
+  /// una catena: la scheda nasconde allora la sezione.
+  Future<List<WatchOrderItem>> watchOrder(String animeId);
+
   /// Verifica che l'Edge Function sia raggiungibile.
   ///
   /// Serve a distinguere "funzione non deployata" da "nessun risultato": senza
@@ -63,13 +79,13 @@ abstract interface class AnimeRepository {
 
 /// Stato dell'Edge Function, per messaggi di errore onesti.
 enum AnimeEdgeHealth {
-  /// La funzione risponde e puo' interrogare Jikan.
+  /// La funzione risponde e puo' interrogare il catalogo esterno.
   ready,
 
   /// La funzione non e' stata deployata.
   missing,
 
-  /// Jikan e' momentaneamente sovraccarico (HTTP 429).
+  /// Il catalogo esterno e' momentaneamente sovraccarico (HTTP 429).
   rateLimited,
 
   /// La funzione c'e' ma fallisce (500, timeout, rete assente).
@@ -92,11 +108,12 @@ class AnimePage {
 
   /// Totale dei risultati, quando il server lo sa.
   ///
-  /// `null` quando arriva da Jikan senza conteggio: la UI mostra allora solo
-  /// il numero di righe caricate, senza inventare un totale.
+  /// `null` quando arriva dal catalogo esterno senza conteggio: la UI mostra
+  /// allora solo il numero di righe caricate, senza inventare un totale.
   final int? total;
 
-  /// true se la pagina e' arrivata dal catalogo locale senza toccare Jikan.
+  /// true se la pagina e' arrivata dal catalogo locale senza interrogare i
+  /// provider esterni.
   ///
   /// Ha un doppio uso: evita di rilanciare la stessa ricerca e permette di
   /// scrivere "gia' in catalogo" senza mentire quando la provenienza non e'
@@ -111,8 +128,9 @@ class SupabaseAnimeRepository implements AnimeRepository {
 
   /// Quanti risultati per pagina.
   ///
-  /// 24 e' la scelta che viene dal config: e' anche il limite di Jikan per
-  /// richiesta, quindi chiedere di piu' alla Edge Function non porterebbe nulla.
+  /// 24 e' la scelta che viene dal config e resta sotto il tetto di 25
+  /// risultati per pagina con cui la Edge Function tronca ogni richiesta:
+  /// chiedere di piu' non porterebbe nulla.
   static const int pageSize = AppConfig.searchPageSize;
 
   @override
@@ -173,11 +191,12 @@ class SupabaseAnimeRepository implements AnimeRepository {
       throw const AnimeFailure('Scrivi qualcosa da cercare.');
     }
 
-    // I filtri non viaggiano: Jikan accetta solo i suoi (`sfw`, `by_popularity`)
-    // e non conosce "voto almeno 7". Tradurre "minScore" in qualcosa che Jikan
-    // capirebbe richiederebbe di scaricare tutti i risultati e filtrarli qui,
-    // che e' il contrario di risparmiare banda. Percio' i filtri restano
-    // al client e vengono riapplicati sulla pagina ricevuta.
+    // I filtri non viaggiano quasi tutti: il catalogo esterno ne accetta pochi
+    // (soltanto il formato, e solo tv/movie/ova/special) e non conosce il "voto
+    // almeno 7". Tradurre "minScore" in qualcosa che il provider capirebbe
+    // richiederebbe di scaricare tutti i risultati e filtrarli qui, che e' il
+    // contrario di risparmiare banda. Percio' i filtri restano al client e
+    // vengono riapplicati sulla pagina ricevuta.
     //
     // E' una scelta con un limite dichiarato: filtrando solo la pagina
     // ricevuta, i risultati mostrati possono essere meno del previsto. La UI
@@ -193,8 +212,8 @@ class SupabaseAnimeRepository implements AnimeRepository {
         AnimeMediaType.movie => 'movie',
         AnimeMediaType.ova => 'ova',
         AnimeMediaType.special => 'special',
-        // ONA e Music non sono fra i filtri di Jikan: non si invia nulla e il
-        // filtro resta da applicare lato client.
+        // ONA e Music non sono fra i formati che il catalogo esterno accetta:
+        // non si invia nulla e il filtro resta da applicare lato client.
         AnimeMediaType.ona || AnimeMediaType.music => null,
       };
       if (flag != null) queryParams['filter'] = flag;
@@ -202,7 +221,7 @@ class SupabaseAnimeRepository implements AnimeRepository {
 
     try {
       final response = await _client.functions.invoke(
-        AppConfig.jikanFunction,
+        AppConfig.catalogFunction,
         method: HttpMethod.get,
         // `route` e' un parametro, non un path: il gateway Supabase chiama
         // sempre la radice della funzione, quindi un `/search` nel path non
@@ -220,9 +239,9 @@ class SupabaseAnimeRepository implements AnimeRepository {
       final body = Map<String, dynamic>.from(decoded);
 
       // La funzione puo' rispondere 200 con un corpo che contiene `error`: e'
-      // il modo che ha per segnalare un fallimento di Jikan senza cambiare il
-      // codice HTTP. Va controllato prima di leggere `results`, altrimenti il
-      // crash sarebbe su una lista inesistente.
+      // il modo che ha per segnalare un fallimento del catalogo esterno senza
+      // cambiare il codice HTTP. Va controllato prima di leggere `results`,
+      // altrimenti il crash sarebbe su una lista inesistente.
       final error = body['error'];
       if (error is String && error.isNotEmpty) {
         throw AnimeFailure(_edgeMessage(body));
@@ -237,7 +256,8 @@ class SupabaseAnimeRepository implements AnimeRepository {
             ]
           : <AnimeEntry>[];
 
-      // Filtri che Jikan non conosce, applicati alla pagina ricevuta.
+      // Filtri che il catalogo esterno non accetta, applicati alla pagina
+      // ricevuta.
       final filtered = _applyLocalFilters(entries, filters);
 
       final pagination = body['pagination'];
@@ -336,6 +356,47 @@ class SupabaseAnimeRepository implements AnimeRepository {
       );
     }
   }
+  @override
+  Future<List<RelatedAnime>> related(String animeId) async {
+    try {
+      final rows = await _client.rpc(
+        'anime_related',
+        params: {'_anime_id': animeId},
+      );
+
+      return [for (final row in _rows(rows)) RelatedAnime.parse(_map(row))];
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on AppFailure {
+      rethrow;
+    } catch (_) {
+      throw const AnimeFailure(
+        'Opere correlate non disponibili. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<List<WatchOrderItem>> watchOrder(String animeId) async {
+    try {
+      final rows = await _client.rpc(
+        'anime_watch_order',
+        params: {'_anime_id': animeId},
+      );
+
+      return [for (final row in _rows(rows)) WatchOrderItem.parse(_map(row))];
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on AppFailure {
+      rethrow;
+    } catch (_) {
+      throw const AnimeFailure(
+        'Ordine di visione non disponibile. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
 
   @override
   Future<AnimeEdgeHealth> checkEdge() async {
@@ -344,7 +405,7 @@ class SupabaseAnimeRepository implements AnimeRepository {
       // ricerca vuota" anche con la funzione perfettamente viva, e il controllo
       // direbbe "non raggiungibile" per unanime che funziona.
       final response = await _client.functions.invoke(
-        AppConfig.jikanFunction,
+        AppConfig.catalogFunction,
         method: HttpMethod.get,
         queryParameters: const {'route': '/health'},
       );
@@ -382,7 +443,7 @@ class SupabaseAnimeRepository implements AnimeRepository {
     if (filters.maxEpisodes != null) '_max_episodes': filters.maxEpisodes,
   };
 
-  /// Applica sul lato client i filtri che Jikan non conosce.
+  /// Applica sul lato client i filtri che il catalogo esterno non accetta.
   ///
   /// Vale solo per la pagina appena ricevuta, non per il catalogo intero: e'
   /// un limite dichiarato del percorso remoto, non un bug.

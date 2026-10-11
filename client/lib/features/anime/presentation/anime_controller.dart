@@ -27,11 +27,11 @@ class AnimeSearchController extends AsyncNotifier<List<AnimeEntry>> {
   /// Quante righe sono state caricate finora: e' l'offset della prossima pagina.
   int _loaded = 0;
 
-  /// true se la ricerca corrente e' gia' stata tentata su Jikan.
+  /// true se la ricerca corrente e' gia' stata tentata sul catalogo esterno.
   ///
-  /// Serve a non ripetere la chiamata remota a ogni scroll: Jikan ha limiti
-  /// stretti e rilanciarla per ogni pagina sarebbe il modo piu' rapido per
-  /// esaurirli.
+  /// Serve a non ripetere la chiamata remota a ogni scroll: i provider hanno
+  /// limiti stretti e rilanciarli per ogni pagina sarebbe il modo piu' rapido
+  /// per esaurirli.
   bool _triedRemote = false;
 
   String get query => _query;
@@ -149,22 +149,22 @@ class AnimeSearchController extends AsyncNotifier<List<AnimeEntry>> {
     }
   }
 
-  /// Se la ricerca locale non ha dato nulla, prova su Jikan.
+  /// Se la ricerca locale non ha dato nulla, prova sul catalogo esterno.
   ///
   /// E' il passaggio che rende il catalogo che si costruisce da solo: la
   /// ricerca locale trova solo cio' che e' gia' stato cercato da qualcun
   /// altro. Senza questo passaggio, il primo utente a cercare un anime
   /// riceverebbe sempre zero risultati e sembrerebbe che l'app sia vuota.
   ///
-  /// [forced] serve al pulsante "cerca su Jikan": senza, un tocco ripetuto non
+  /// [forced] serve al pulsante "cerca online": senza, un tocco ripetuto non
   /// farebbe nulla e sembrerebbe un pulsante morto.
   Future<void> searchRemote({bool forced = false}) async {
     final current = state.value ?? const [];
     final pagination = ref.read(animePaginationProvider.notifier);
 
-    // Non ha senso cercare su Jikan un catalogo vuoto in partenza o mentre
-    // gia' sta caricando: due richieste sovrapposte su Jikan peggiorano solo
-    // la quota.
+    // Non ha senso interrogare il catalogo esterno con un catalogo vuoto in
+    // partenza o mentre gia' sta caricando: due richieste sovrapposte ai
+    // provider peggiorano solo la quota.
     if (pagination.current.isLoadingMore) return;
     if (!forced && (_query.isEmpty || _triedRemote)) return;
     if (!forced && current.isNotEmpty) return;
@@ -184,10 +184,10 @@ class AnimeSearchController extends AsyncNotifier<List<AnimeEntry>> {
       _triedRemote = true;
       pagination.finished(hasMore: page.hasNext);
 
-      // I risultati di Jikan hanno `id` null finche' la cache non li ha
-      // scritti. Se la scrittura e' riuscita, la ricerca locale successiva li
-      // restituisce con l'id, quindi non si tenta di costruirlo qui: inventare
-      // un id darebbe un voto destinato a fallire.
+      // I risultati del catalogo esterno hanno `id` null finche' la cache non
+      // li ha scritti. Se la scrittura e' riuscita, la ricerca locale successiva
+      // li restituisce con l'id, quindi non si tenta di costruirlo qui:
+      // inventare un id darebbe un voto destinato a fallire.
       state = AsyncData(_merge(current, page.results));
     } on AnimeFailure catch (e) {
       _triedRemote = true;
@@ -221,9 +221,9 @@ class AnimeSearchController extends AsyncNotifier<List<AnimeEntry>> {
 
 /// Quante righe si caricano per volta.
 ///
-/// 24 e' il numero di risultati che Jikan restituisce per richiesta e anche la
-/// dimensione dichiarata in `AppConfig`: chiedere di piu' alla Edge Function
-/// verrebbe troncato da Jikan, quindi non ha senso.
+/// 24 e' la dimensione dichiarata in `AppConfig` e resta sotto il tetto di 25
+/// risultati per pagina con cui la Edge Function tronca ogni richiesta: chiedere
+/// di piu' verrebbe tagliato li', quindi non ha senso.
 class AnimePageSize {
   const AnimePageSize._();
 
@@ -382,6 +382,25 @@ final animeStatsProvider =
       AnimeStatsController.new,
       retry: appRetry,
     );
+
+/// Opere correlate di un anime (sequel, prequel, ...).
+///
+/// [FutureProvider.family] e non un controller: le relazioni si leggono e
+/// basta, non c'e' nessuna azione che le modifichi e nessuno stato da tenere.
+/// L'argomento e' l'id interno del catalogo.
+final relatedAnimeProvider =
+    FutureProvider.family<List<RelatedAnime>, String>((ref, animeId) async {
+  return ref.watch(animeRepositoryProvider).related(animeId);
+});
+
+/// Ordine di visione consigliato di una saga ("da dove iniziare").
+///
+/// Stessa forma di [relatedAnimeProvider]: si legge e basta, l'argomento e'
+/// l'id interno del catalogo.
+final watchOrderProvider =
+    FutureProvider.family<List<WatchOrderItem>, String>((ref, animeId) async {
+  return ref.watch(animeRepositoryProvider).watchOrder(animeId);
+});
 
 /// Stato dell'Edge Function.
 ///

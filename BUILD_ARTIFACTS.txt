@@ -1,0 +1,7 @@
+﻿Artefatti pronti:
+
+- animerank_v0.1.0.apk (99.3MB)
+- animerank_v0.1.0.aab (75.0MB)
+- animerank_windows_v0.1.0.zip (34.2MB)
+
+File di supporto: BUILD_ARTIFACTS.txt + diagnostici su Desktop.

@@ -86,9 +86,9 @@ class HomeFeedController extends AsyncNotifier<HomeFeed> {
   Future<HomeFeed> _build(AnimeRepository repository) async {
     // La stagione corrente viene da un endpoint dedicato ed e' l'unica riga
     // che ha senso mostrare anche quando il catalogo locale e' ancora vuoto,
-    // perche' arriva fresca da Jikan. Se fallisce non pero' si trascina dietro
-    // tutta la home: e' un di piu', quindi l'errore si ignora qui e le altre
-    // righe si costruiscono lo stesso.
+    // perche' arriva fresca dal catalogo esterno. Se fallisce non pero' si
+    // trascina dietro tutta la home: e' un di piu', quindi l'errore si ignora
+    // qui e le altre righe si costruiscono lo stesso.
     List<AnimeEntry> season = const [];
     try {
       season = await repository.currentSeason(limit: 20);
@@ -155,7 +155,7 @@ class HomeFeedController extends AsyncNotifier<HomeFeed> {
         ),
         _row(
           title: 'I piu popolari',
-          subtitle: 'I piu cercati su MyAnimeList',
+          subtitle: 'I piu cercati sul catalogo',
           entries: entries,
           compare: (a, b) {
             final byPopularity = _compareNullableDesc(a.popularity, b.popularity);

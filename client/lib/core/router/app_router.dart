@@ -10,6 +10,7 @@ import '../../features/anime/domain/anime.dart';
 import '../../features/anime/presentation/screens/anime_detail_screen.dart';
 import '../../features/anime/presentation/screens/anime_search_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
+import '../../features/auth/presentation/screens/reset_password_screen.dart';
 import '../../features/duels/presentation/screens/duels_screen.dart';
 import '../../features/episodes/presentation/screens/episode_screen.dart';
 import '../../features/groups/presentation/screens/create_group_screen.dart';
@@ -25,6 +26,7 @@ import '../../features/ranking/presentation/screens/ranking_screen.dart';
 import '../../features/shell/presentation/shell_screen.dart';
 import '../../features/tournaments/presentation/screens/tournament_detail_screen.dart';
 import '../../features/tournaments/presentation/screens/tournaments_screen.dart';
+import '../../features/watchlist/presentation/screens/my_list_screen.dart';
 import '../../features/watchlist/presentation/screens/watchlist_screen.dart';
 
 /// Nomi delle rotte.
@@ -37,6 +39,14 @@ class AppRoutes {
   static const String home = '/';
   static const String login = '/login';
   static const String register = '/register';
+
+  /// Schermata di scelta della nuova password, aperta dal link di reset.
+  ///
+  /// Non e' in [public]: e' raggiungibile solo mentre il recupero e' in corso,
+  /// cioe' quando `passwordRecoveryPendingProvider` e' true. Il redirect la
+  /// protegge come una schermata privata, ma con una regola a parte perche'
+  /// durante il recupero l'utente e' tecnicamente collegato.
+  static const String resetPassword = '/reset-password';
 
   static const String groups = '/groups';
   static const String createGroup = '/groups/create';
@@ -55,6 +65,14 @@ class AppRoutes {
   /// Ogni rotta con `:groupId` sotto resta quella vera: il selettore sparisce
   /// appena l'utente sceglie.
   static const String rankingPicker = '/ranking';
+
+  /// "La mia lista": la watchlist personale unita fra tutti i gruppi.
+  ///
+  /// Sostituisce, nella navigazione globale, il selettore di gruppo della
+  /// watchlist: da qui si vede tutto in una volta. La watchlist di un singolo
+  /// gruppo resta raggiungibile dal dettaglio del gruppo.
+  static const String myList = '/my-list';
+
   static const String watchlistPicker = '/watchlist';
   static const String duelsPicker = '/duels';
   static const String tournamentsPicker = '/tournaments';
@@ -129,8 +147,7 @@ class AppRoutes {
       '$animeSearch/$animeId/episode/$episodeId';
 
   /// Visione dell'opera con il primo episodio, dalla scheda anime.
-  static String firstEpisode(String animeId) =>
-      '$animeSearch/$animeId/episode';
+  static String firstEpisode(String animeId) => '$animeSearch/$animeId/episode';
 
   /// Rotte raggiungibili senza sessione.
   static const Set<String> public = {login, register};
@@ -150,190 +167,216 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier<int>(0);
   ref.onDispose(refresh.dispose);
   ref.listen<AuthStatus>(authStatusProvider, (_, _) => refresh.value++);
+  // Anche il recupero password fa cambiare rotta: quando scatta l'evento,
+  // o quando finisce, il router deve ri-valutare il redirect.
+  ref.listen<bool>(passwordRecoveryPendingProvider, (_, _) => refresh.value++);
 
   return GoRouter(
     initialLocation: AppRoutes.home,
     refreshListenable: refresh,
     routes: [
-      GoRoute(
-        path: AppRoutes.home,
-        builder: (context, state) => const ShellScreen(),
-      ),
-      // Sotto-gruppo dei gruppi: il percorso condivide il prefisso, quindi
-      // ogni schermata di gruppo eredita la protezione dichiarata sotto.
-      GoRoute(
-        path: AppRoutes.groups,
-        builder: (context, state) => const GroupsListScreen(),
+      // Le sezioni vivono dentro la shell: cosi' la barra (in basso su
+      // telefono, laterale su desktop) resta visibile anche aprendo un gruppo o
+      // una sua sezione, invece di sparire dietro una pagina a tutta finestra.
+      // Login e registrazione restano fuori: non hanno una barra da mostrare.
+      ShellRoute(
+        builder: (context, state, child) =>
+            ShellScreen(location: state.matchedLocation, child: child),
         routes: [
           GoRoute(
-            path: 'create',
-            builder: (context, state) => const CreateGroupScreen(),
+            path: AppRoutes.home,
+            builder: (context, state) => const ShellHomeBody(),
+          ),
+          // Sotto-gruppo dei gruppi: il percorso condivide il prefisso, quindi
+          // ogni schermata di gruppo eredita la protezione dichiarata sotto.
+          GoRoute(
+            path: AppRoutes.groups,
+            pageBuilder: (context, state) =>
+                arSectionRoute(child: const GroupsListScreen()),
+            routes: [
+              GoRoute(
+                path: 'create',
+                builder: (context, state) => const CreateGroupScreen(),
+              ),
+              GoRoute(
+                path: 'join',
+                builder: (context, state) => const JoinGroupScreen(),
+              ),
+              GoRoute(
+                path: ':id',
+                builder: (context, state) =>
+                    GroupDetailScreen(groupId: state.pathParameters['id']!),
+              ),
+              // Rotta sorella e non figlia di `:id`: metterla dentro avrebbe
+              // costretto `:id` a dichiarare una child vuota per continuare a
+              // rispondere da solo, e `/groups/members/xyz` si sarebbe potuto
+              // confondere con un id di gruppo.
+              GoRoute(
+                path: 'members/:id',
+                builder: (context, state) =>
+                    GroupMembersScreen(groupId: state.pathParameters['id']!),
+              ),
+            ],
+          ),
+          // Le quattro sezioni per gruppo hanno una rotta senza `groupId`, che fa
+          // scegliere il gruppo, e una con `groupId`, che e' la sezione vera.
+          // Sono rotte distinte e non una con parametro opzionale: un parametro
+          // che puo' mancare farebbe dipendere il comportamento dal posto da cui
+          // si arriva, mentre qui la scelta e' sempre esplicita e resta nella
+          // cronologia.
+          GoRoute(
+            path: AppRoutes.rankingPicker,
+            pageBuilder: (_, _) => arSectionRoute(
+              child: const GroupPickerScreen(section: GroupSection.ranking),
+            ),
           ),
           GoRoute(
-            path: 'join',
-            builder: (context, state) => const JoinGroupScreen(),
+            path: AppRoutes.myList,
+            pageBuilder: (context, state) =>
+                arSectionRoute(child: const MyListScreen()),
           ),
           GoRoute(
-            path: ':id',
-            builder: (context, state) =>
-                GroupDetailScreen(groupId: state.pathParameters['id']!),
+            path: AppRoutes.watchlistPicker,
+            pageBuilder: (_, _) => arSectionRoute(
+              child: const GroupPickerScreen(section: GroupSection.watchlist),
+            ),
           ),
-          // Rotta sorella e non figlia di `:id`: metterla dentro avrebbe
-          // costretto `:id` a dichiarare una child vuota per continuare a
-          // rispondere da solo, e `/groups/members/xyz` si sarebbe potuto
-          // confondere con un id di gruppo.
           GoRoute(
-            path: 'members/:id',
-            builder: (context, state) =>
-                GroupMembersScreen(groupId: state.pathParameters['id']!),
+            path: AppRoutes.duelsPicker,
+            pageBuilder: (_, _) => arSectionRoute(
+              child: const GroupPickerScreen(section: GroupSection.duels),
+            ),
           ),
-        ],
-      ),
-      // Le quattro sezioni per gruppo hanno una rotta senza `groupId`, che fa
-      // scegliere il gruppo, e una con `groupId`, che e' la sezione vera.
-      // Sono rotte distinte e non una con parametro opzionale: un parametro
-      // che puo' mancare farebbe dipendere il comportamento dal posto da cui
-      // si arriva, mentre qui la scelta e' sempre esplicita e resta nella
-      // cronologia.
-      GoRoute(
-        path: AppRoutes.rankingPicker,
-        builder: (_, _) =>
-            const GroupPickerScreen(section: GroupSection.ranking),
-      ),
-      GoRoute(
-        path: AppRoutes.watchlistPicker,
-        builder: (_, _) =>
-            const GroupPickerScreen(section: GroupSection.watchlist),
-      ),
-      GoRoute(
-        path: AppRoutes.duelsPicker,
-        builder: (_, _) => const GroupPickerScreen(section: GroupSection.duels),
-      ),
-      GoRoute(
-        path: AppRoutes.tournamentsPicker,
-        builder: (_, _) =>
-            const GroupPickerScreen(section: GroupSection.tournaments),
-      ),
-      // La classifica sta su un percorso proprio: dentro `/groups/:id`
-      // sostituirebbe il dettaglio del gruppo, che resta la schermata da cui si
-      // parte, e servirebbe un terzo parametro sulla stessa rotta.
-      GoRoute(
-        path: '/ranking/:groupId',
-        builder: (context, state) => RankingScreen(
-          groupId: state.pathParameters['groupId']!,
-          // Il nome del gruppo viaggia in `extra`, non nel percorso: serve solo
-          // al titolo e deve poter mancare (rotta aperta a mano, deep link), e
-          // un parametro di percorso che si puo' omettere romperebbe la
-          // navigazione indietro.
-          groupName: state.extra as String?,
-        ),
-      ),
-      GoRoute(
-        path: '/watchlist/:groupId',
-        builder: (context, state) => WatchlistScreen(
-          groupId: state.pathParameters['groupId']!,
-          groupName: state.extra as String?,
-        ),
-      ),
-      GoRoute(
-        path: '/duels/:groupId',
-        builder: (context, state) => DuelsScreen(
-          groupId: state.pathParameters['groupId']!,
-          groupName: state.extra as String?,
-        ),
-      ),
-      GoRoute(
-        path: '/tournaments/:groupId',
-        builder: (context, state) => TournamentsScreen(
-          groupId: state.pathParameters['groupId']!,
-          groupName: state.extra as String?,
-        ),
-        routes: [
           GoRoute(
-            path: ':tournamentId',
-            builder: (context, state) => TournamentDetailScreen(
-              tournamentId: state.pathParameters['tournamentId']!,
+            path: AppRoutes.tournamentsPicker,
+            pageBuilder: (_, _) => arSectionRoute(
+              child: const GroupPickerScreen(section: GroupSection.tournaments),
+            ),
+          ),
+          // La classifica sta su un percorso proprio: dentro `/groups/:id`
+          // sostituirebbe il dettaglio del gruppo, che resta la schermata da cui si
+          // parte, e servirebbe un terzo parametro sulla stessa rotta.
+          GoRoute(
+            path: '/ranking/:groupId',
+            builder: (context, state) => RankingScreen(
               groupId: state.pathParameters['groupId']!,
-              // `canDelete` e' deciso dal ruolo nel gruppo, che il router non
-              // conosce: viaggia in `extra` come il nome del gruppo. Se manca
-              // (deep link) il menu non compare, che e' il comportamento
-              // corretto per un ruolo sconosciuto.
-              canDelete: state.extra as bool? ?? false,
+              // Il nome del gruppo viaggia in `extra`, non nel percorso: serve solo
+              // al titolo e deve poter mancare (rotta aperta a mano, deep link), e
+              // un parametro di percorso che si puo' omettere romperebbe la
+              // navigazione indietro.
+              groupName: state.extra as String?,
             ),
           ),
-        ],
-      ),
-      // Sotto-gruppo del profilo: le schermate di impostazioni e cancellazione
-      // sono raggiungibili solo da un utente collegato, quindi stanno sotto
-      // `/profile` che non e' in AppRoutes.public.
-      // Il catalogo e' una sezione di primo livello, non una schermata che si
-      // raggiunge da un gruppo: e' la prima cosa che un utente nuovo cerca,
-      // perche' senza anime votati non c'e' niente da fare in nessuna sezione.
-      GoRoute(
-        path: AppRoutes.animeSearch,
-        builder: (context, state) => const AnimeSearchScreen(),
-        routes: [
           GoRoute(
-            path: 'detail',
-            // `pageBuilder` e non `builder`: e' l'unico modo per dire a
-            // GoRouter di usare una transizione invece del salto istantaneo
-            // di default. Con `builder` l'animazione si perde e la scheda
-            // apparirebbe di colpo, senza il volo dell'immagine.
-            pageBuilder: (context, state) {
-              // `extra` porta l'opera. Se manca — rotta aperta a mano, deep
-              // link, ripristino dopo un crash — non si puo' mostrare nulla di
-              // utile, quindi si torna alla ricerca invece di disegnare una
-              // pagina vuota che sembrerebbe un errore.
-              final entry = state.extra as AnimeEntry?;
-
-              if (entry == null) {
-                return MaterialPage<void>(
-                  name: AppRoutes.animeDetail,
-                  child: const AnimeSearchScreen(),
-                );
-              }
-
-              return arDetailRoute<void>(
-                name: AppRoutes.animeDetail,
-                child: AnimeDetailScreen(
-                  entry: entry,
-                  heroTag: entry.heroTag,
+            path: '/watchlist/:groupId',
+            builder: (context, state) => WatchlistScreen(
+              groupId: state.pathParameters['groupId']!,
+              groupName: state.extra as String?,
+            ),
+          ),
+          GoRoute(
+            path: '/duels/:groupId',
+            builder: (context, state) => DuelsScreen(
+              groupId: state.pathParameters['groupId']!,
+              groupName: state.extra as String?,
+            ),
+          ),
+          GoRoute(
+            path: '/tournaments/:groupId',
+            builder: (context, state) => TournamentsScreen(
+              groupId: state.pathParameters['groupId']!,
+              groupName: state.extra as String?,
+            ),
+            routes: [
+              GoRoute(
+                path: ':tournamentId',
+                builder: (context, state) => TournamentDetailScreen(
+                  tournamentId: state.pathParameters['tournamentId']!,
+                  groupId: state.pathParameters['groupId']!,
+                  // `canDelete` e' deciso dal ruolo nel gruppo, che il router non
+                  // conosce: viaggia in `extra` come il nome del gruppo. Se manca
+                  // (deep link) il menu non compare, che e' il comportamento
+                  // corretto per un ruolo sconosciuto.
+                  canDelete: state.extra as bool? ?? false,
                 ),
-              );
-            },
+              ),
+            ],
+          ),
+          // Sotto-gruppo del profilo: le schermate di impostazioni e cancellazione
+          // sono raggiungibili solo da un utente collegato, quindi stanno sotto
+          // `/profile` che non e' in AppRoutes.public.
+          // Il catalogo e' una sezione di primo livello, non una schermata che si
+          // raggiunge da un gruppo: e' la prima cosa che un utente nuovo cerca,
+          // perche' senza anime votati non c'e' niente da fare in nessuna sezione.
+          GoRoute(
+            path: AppRoutes.animeSearch,
+            pageBuilder: (context, state) =>
+                arSectionRoute(child: const AnimeSearchScreen()),
+            routes: [
+              GoRoute(
+                path: 'detail',
+                // `pageBuilder` e non `builder`: e' l'unico modo per dire a
+                // GoRouter di usare una transizione invece del salto istantaneo
+                // di default. Con `builder` l'animazione si perde e la scheda
+                // apparirebbe di colpo, senza il volo dell'immagine.
+                pageBuilder: (context, state) {
+                  // `extra` porta l'opera. Se manca — rotta aperta a mano, deep
+                  // link, ripristino dopo un crash — non si puo' mostrare nulla di
+                  // utile, quindi si torna alla ricerca invece di disegnare una
+                  // pagina vuota che sembrerebbe un errore.
+                  final entry = state.extra as AnimeEntry?;
+
+                  if (entry == null) {
+                    return MaterialPage<void>(
+                      name: AppRoutes.animeDetail,
+                      child: const AnimeSearchScreen(),
+                    );
+                  }
+
+                  return arDetailRoute<void>(
+                    name: AppRoutes.animeDetail,
+                    child: AnimeDetailScreen(
+                      entry: entry,
+                      heroTag: entry.heroTag,
+                    ),
+                  );
+                },
+              ),
+              GoRoute(
+                path: ':animeId/episode/:episodeId',
+                builder: (context, state) => EpisodeScreen(
+                  animeId: state.pathParameters['animeId']!,
+                  episodeId: state.pathParameters['episodeId']!,
+                  animeTitle: state.extra as String?,
+                ),
+              ),
+              // Stessa pagina senza episodio scelto: e' la porta d'ingresso dalla
+              // scheda dell'opera, dove l'utente ha premuto "Guarda" senza sapere
+              // quale episodio esiste. La schermata allora apre il primo
+              // disponibile, che di solito e' quello che voleva.
+              GoRoute(
+                path: ':animeId/episode',
+                builder: (context, state) => EpisodeScreen(
+                  animeId: state.pathParameters['animeId']!,
+                  animeTitle: state.extra as String?,
+                ),
+              ),
+            ],
           ),
           GoRoute(
-            path: ':animeId/episode/:episodeId',
-            builder: (context, state) => EpisodeScreen(
-              animeId: state.pathParameters['animeId']!,
-              episodeId: state.pathParameters['episodeId']!,
-              animeTitle: state.extra as String?,
-            ),
-          ),
-          // Stessa pagina senza episodio scelto: e' la porta d'ingresso dalla
-          // scheda dell'opera, dove l'utente ha premuto "Guarda" senza sapere
-          // quale episodio esiste. La schermata allora apre il primo
-          // disponibile, che di solito e' quello che voleva.
-          GoRoute(
-            path: ':animeId/episode',
-            builder: (context, state) => EpisodeScreen(
-              animeId: state.pathParameters['animeId']!,
-              animeTitle: state.extra as String?,
-            ),
-          ),
-        ],
-      ),
-      GoRoute(
-        path: AppRoutes.profile,
-        builder: (context, state) => const ProfileScreen(),
-        routes: [
-          GoRoute(
-            path: 'notifications',
-            builder: (context, state) => const NotificationSettingsScreen(),
-          ),
-          GoRoute(
-            path: 'delete',
-            builder: (context, state) => const DeleteAccountScreen(),
+            path: AppRoutes.profile,
+            pageBuilder: (context, state) =>
+                arSectionRoute(child: const ProfileScreen()),
+            routes: [
+              GoRoute(
+                path: 'notifications',
+                builder: (context, state) => const NotificationSettingsScreen(),
+              ),
+              GoRoute(
+                path: 'delete',
+                builder: (context, state) => const DeleteAccountScreen(),
+              ),
+            ],
           ),
         ],
       ),
@@ -345,11 +388,39 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.register,
         builder: (context, state) => const RegisterScreen(),
       ),
+      // Fuori dalla shell: durante il recupero la barra di navigazione non
+      // deve essere raggiungibile, altrimenti si potrebbe entrare nelle sezioni
+      // con la password vecchia ancora attiva.
+      GoRoute(
+        path: AppRoutes.resetPassword,
+        builder: (context, state) => const ResetPasswordScreen(),
+      ),
     ],
     redirect: (context, state) {
+      final status = ref.read(authStatusProvider);
+      final recovering = ref.read(passwordRecoveryPendingProvider);
+
+      // Durante il recupero l'utente e' tecnicamente collegato (Supabase apre
+      // una sessione dal link) ma non deve entrare nell'app: resta sulla
+      // schermata di cambio password finche' non ne sceglie una nuova. Questo
+      // controllo sta prima degli altri perche' deve avere la precedenza su
+      // "collegato -> vai alla home".
+      if (recovering) {
+        return state.matchedLocation == AppRoutes.resetPassword
+            ? null
+            : AppRoutes.resetPassword;
+      }
+
+      // Recupero finito (o mai iniziato) ma ci si trova ancora sulla schermata
+      // di reset, per esempio perche' il link e' stato chiuso: non la si lascia
+      // appesa, si torna dove ha senso in base alla sessione.
+      if (state.matchedLocation == AppRoutes.resetPassword) {
+        return status is AuthSignedIn ? AppRoutes.home : AppRoutes.login;
+      }
+
       final isPublic = AppRoutes.public.contains(state.matchedLocation);
 
-      return switch (ref.read(authStatusProvider)) {
+      return switch (status) {
         // Collegato: la schermata di login o registrazione non ha senso, si
         // torna alla home. Il nome della rotta (/login) verrebbe sostituito
         // da go() che pila la cronologia: replace() non lascia un "indietro"

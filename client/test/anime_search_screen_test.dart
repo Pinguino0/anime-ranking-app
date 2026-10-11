@@ -144,7 +144,7 @@ void main() {
       },
     );
 
-    testWidgets('un risultato vuoto offre di cercare su Jikan', (tester) async {
+    testWidgets('un risultato vuoto offre di cercare online', (tester) async {
       // E' il passaggio che riempie il catalogo: senza pulsante, l'utente
       // aspetterebbe che la ricerca trovi da sola un anime che non e' mai
       // stato cercato da nessuno.
@@ -155,12 +155,12 @@ void main() {
         ];
       await pumpSearch(tester, repo);
 
-      // Serve un testo da cercare: Jikan risponde a una domanda, non a "tutto".
-      // Senza testo il pulsante non avrebbe niente da chiedere.
+      // Serve un testo da cercare: il catalogo esterno risponde a una domanda,
+      // non a "tutto". Senza testo il pulsante non avrebbe niente da chiedere.
       await tester.enterText(find.byType(TextField), 'akira');
       await tester.pump(const Duration(milliseconds: 400));
 
-      final pulsante = find.textContaining('Jikan');
+      final pulsante = find.textContaining('online');
       expect(pulsante, findsOneWidget);
 
       await tester.tap(pulsante);
@@ -426,6 +426,130 @@ void main() {
       expect(find.byType(AnimeCard), findsOneWidget);
     });
   });
+
+  group('striscia dei recenti', () {
+    testWidgets('la card compatta non sfora la striscia', (tester) async {
+      // Titolo lungo: e' la casetta peggiore per la colonna compatta, che
+      // dentro una striscia di altezza fissa deve fare spazio a due righe.
+      await pumpCompactCard(
+        tester,
+        'Il titolo piu lungo del mondo mai scritto su una card',
+      );
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'una RenderFlex che sfora disegna strisce gialle e nere',
+      );
+    });
+
+    testWidgets('la card compatta regge anche col testo ingrandito', (
+      tester,
+    ) async {
+      // L'overflow di 30 pixel spariva con il testo normale e tornava con il
+      // testo ingrandito: e' il caso in cui il titolo e' piu' alto e la
+      // locandina deve cedere ancora di piu'.
+      await pumpCompactCard(
+        tester,
+        'Un titolo abbastanza lungo da andare a capo',
+        textScale: 2.0,
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('la locandina occupa quello che resta dopo il titolo', (
+      tester,
+    ) async {
+      // Non basta che non sforzi: il titolo deve restare leggibile per intero.
+      // Se fosse la locandina a farsi spazio, il titolo verrebbe schiacciato a
+      // zero righe e la card direbbe solo "Immagine rotta".
+      await pumpCompactCard(tester, 'Shingeki no Kyojin');
+
+      final titolo = find.text('Shingeki no Kyojin');
+      expect(titolo, findsOneWidget);
+      // La colonna deve aver lasciato al titolo un'altezza reale: una
+      // locandina che mangia tutto lo spazio farebbe sparire il testo e la
+      // card direbbe solo "Immagine rotta".
+      expect(tester.getSize(titolo).height, greaterThan(0));
+    });
+  });
+
+  group('tornare indietro', () {
+    testWidgets('aperta da un altra schermata si torna indietro', (
+      tester,
+    ) async {
+      await pumpSearchOver(
+        tester,
+        FakeAnimeRepository(
+          initial: [animeFixture(externalId: '1', title: 'Akira')],
+        ),
+      );
+
+      // Senza questo pulsante la ricerca era una strada a senso unico: da
+      // sola, l'unico modo di tornare era Esc o il gesto di sistema.
+      expect(find.byTooltip('Indietro'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Indietro'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('pagina di sotto'), findsOneWidget);
+      expect(find.byType(AnimeSearchScreen), findsNothing);
+    });
+
+    testWidgets('aperta per un link non mette un pulsante che non serve', (
+      tester,
+    ) async {
+      // Deep link: non c'e' una pagina precedente. Un pulsante che non fa
+      // niente e' peggio di un pulsante assente, perche' promette un ritorno
+      // che non esiste.
+      await pumpSearch(tester, FakeAnimeRepository());
+
+      expect(find.byTooltip('Indietro'), findsNothing);
+    });
+  });
+}
+
+/// Monta una card compatta dentro una striscia alta come quella vera.
+///
+/// La striscia dei recenti e' una `ListView` orizzontale dentro una
+/// `SizedBox(height: 196)`: l'altezza e' imposta li' e non dalla card. Montare
+/// la card da sola darebbe un'altezza libera, l'overflow non si produrrebbe e
+/// il test passerebbe senza provare niente.
+///
+/// Non si usa la schermata intera perche' la striscia dei recenti compare solo
+/// dopo l'apertura del pannello: senza recenti la card compatta non viene
+/// costruita e l'errore di layout non arriverebbe mai a esistere.
+Future<void> pumpCompactCard(
+  WidgetTester tester,
+  String title, {
+  double textScale = 1.0,
+}) async {
+  tester.view.physicalSize = const Size(400, 900);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+
+  if (textScale != 1.0) {
+    tester.platformDispatcher.textScaleFactorTestValue = textScale;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+  }
+
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: SizedBox(
+            height: 196,
+            child: AnimeSearchResultCard(
+              entry: AnimeEntry(externalId: '1', title: title),
+              compact: true,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
 }
 
 /// Tocca una pastiglia del pannello filtri, portandola in vista prima.
@@ -439,6 +563,37 @@ Future<void> tapChip(WidgetTester tester, Type chipType, String label) async {
   await tester.ensureVisible(chip);
   await tester.pumpAndSettle();
   await tester.tap(chip);
+  await tester.pumpAndSettle();
+}
+
+/// Monta la ricerca DENTRO un percorso che ha una pagina sotto.
+///
+/// Serve perche' l'indietro esiste solo se c'e' qualcosa da cui tornare: con
+/// la schermata montata da sola `canPop()` e' sempre falso e il pulsante non
+/// comparirebbe mai, quindi il test passerebbe anche senza il fix.
+Future<void> pumpSearchOver(
+  WidgetTester tester,
+  AnimeRepository repo, {
+  Size size = const Size(400, 900),
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+
+  final navigator = GlobalKey<NavigatorState>();
+
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [animeRepositoryProvider.overrideWithValue(repo)],
+      child: MaterialApp(
+        navigatorKey: navigator,
+        home: const Scaffold(body: Text('pagina di sotto')),
+      ),
+    ),
+  );
+  navigator.currentState!.push(
+    MaterialPageRoute<void>(builder: (_) => const AnimeSearchScreen()),
+  );
   await tester.pumpAndSettle();
 }
 

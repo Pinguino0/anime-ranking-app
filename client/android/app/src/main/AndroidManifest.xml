@@ -1,4 +1,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- L'aggiornamento in app scarica l'APK e poi chiede ad Android di
+         installarlo. Il permesso che lo permette e' REQUEST_INSTALL_PACKAGES,
+         dichiarato anche dal plugin ota_update e quindi gia'merged da solo:
+         qui si ripete perche' e' un permesso che l'utente deve concedere a
+         mano e merita di essere dichiarato in modo esplicito, accanto
+         all'app che lo usa.
+
+         Android 8 chiede all'utente un consenso separato ("installa app
+         sconosciute") per questa app. Non si puo' aggirarlo, ed e' il
+         comportamento giusto: chi scarica un APK da fuori e lo esegue deve
+         poter dire di no. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
+    <!-- Da Android 13 mostrare notifiche richiede un consenso esplicito. Se il
+         permesso non e' dichiarato qui, la richiesta fatta dal codice viene
+         negata in silenzio e i push non compaiono mai. Sotto Android 13 non
+         esiste e questa riga non cambia nulla. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="animerank"
         android:name="${applicationName}"
@@ -24,12 +43,72 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Il link di recupero password torna nell'app con lo scheme
+                 io.animerank.app. Android riapre l'app solo se un intent-filter
+                 dichiara quello scheme: senza questo, toccare il pulsante
+                 nell'email non riporta dentro l'app e la password non si puo'
+                 reimpostare. android:autoVerify non serve: e' uno scheme
+                 proprietario, non un link https. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="io.animerank.app"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Canale usato dai push che arrivano ad app chiusa o in secondo
+             piano. Il server lo indica nel payload (`animerank_default`) e deve
+             gia' esistere, altrimenti Android non mostra niente: lo crea l'app
+             all'avvio, in `PushNotifications`. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="animerank_default" />
+
+        <!-- Spegne Impeller e torna al renderer OpenGL di Skia.
+             Su Android 10+ Flutter usa Impeller (Vulkan) di default; su alcune
+             GPU vecchie, tipicamente i driver Mali, il crash e' nel driver
+             nativo, quindi non si riesce a intercettarlo né a gestirlo: l'app si
+             apre e si chiude subito. La doc Flutter indica proprio questo
+             meta-data come via d'uscita (l'opt-out e' deprecato ma ancora
+             supportato). Su Android 9 e precedenti il passaggio avviene da solo
+             e questa riga non cambia nulla. Il costo e' la minore fluidita' di
+             Impeller sui telefoni nuovi, accettabile per un'app di classifiche
+             che non e' legata alla grafica: la priorita' e' che si apra. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
+
+        <!-- L'installatore di Android non accetta un percorso file grezzo da
+             Android 7 in poi: il plugin ota_update passa l'APK scaricato come
+             content:// tramite FileProvider. Senza questo provider dichiarato
+             (con la stessa authority che il plugin si aspetta) il lancio
+             dell'installatore fallisce e nessun popup di sistema compare.
+             Il file_paths punta a files/ota_update/, dove il plugin salva. -->
+        <provider
+            android:name="sk.fourq.otaupdate.OtaUpdateFileProvider"
+            android:authorities="${applicationId}.ota_update_provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/filepaths" />
+        </provider>
+
+        <!-- Il plugin riporta l'esito dell'installazione su questo receiver:
+             senza, l'app resta su "si sta installando" e non sa se e' andata. -->
+        <receiver
+            android:name="sk.fourq.otaupdate.InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="${applicationId}.ACTION_INSTALL_COMPLETE" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

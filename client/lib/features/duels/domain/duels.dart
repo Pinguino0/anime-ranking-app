@@ -16,6 +16,8 @@ class DuelPair {
     required this.animeBId,
     required this.titleA,
     required this.titleB,
+    this.titleItA,
+    this.titleItB,
     this.imageA,
     this.imageB,
   });
@@ -24,8 +26,18 @@ class DuelPair {
   final String animeBId;
   final String titleA;
   final String titleB;
+
+  /// Titoli italiani dei due contendenti, se il catalogo li conosce.
+  final String? titleItA;
+  final String? titleItB;
   final String? imageA;
   final String? imageB;
+
+  /// Titolo mostrato per il primo contendente: italiano se disponibile.
+  String get displayTitleA => titleItA ?? titleA;
+
+  /// Titolo mostrato per il secondo contendente: italiano se disponibile.
+  String get displayTitleB => titleItB ?? titleB;
 
   /// true se la coppia regge i vincoli del database.
   ///
@@ -39,11 +51,13 @@ class DuelPair {
         animeBId: _text(json['anime_b_id']) ?? '',
         titleA: _text(json['title_a']) ?? 'Senza titolo',
         titleB: _text(json['title_b']) ?? 'Senza titolo',
+        titleItA: _text(json['title_it_a']),
+        titleItB: _text(json['title_it_b']),
         imageA: _text(json['image_a']),
         imageB: _text(json['image_b']),
       );
 
-  String titleOf(String animeId) => animeId == animeAId ? titleA : titleB;
+  String titleOf(String animeId) => animeId == animeAId ? displayTitleA : displayTitleB;
 
   String? imageOf(String animeId) => animeId == animeAId ? imageA : imageB;
 
@@ -78,6 +92,7 @@ class DuelStanding {
     required this.title,
     required this.elo,
     required this.duelCount,
+    this.italianTitle,
     this.imageUrl,
   });
 
@@ -86,13 +101,21 @@ class DuelStanding {
   final String title;
   final int elo;
   final int duelCount;
+
+  /// Titolo italiano, se il catalogo lo conosce. La UI usa [displayTitle].
+  final String? italianTitle;
   final String? imageUrl;
+
+  /// Titolo mostrato all'utente: italiano se disponibile, altrimenti il titolo
+  /// del catalogo.
+  String get displayTitle => italianTitle ?? title;
 
   factory DuelStanding.parse(Map<String, dynamic> json, {required int position}) =>
       DuelStanding(
         position: position,
         animeId: _text(json['anime_id']) ?? '',
         title: _text(json['title']) ?? 'Senza titolo',
+        italianTitle: _text(json['title_it']),
         elo: _toInt(json['elo']) ?? DuelElo.starting,
         duelCount: _toInt(json['duel_count']) ?? 0,
         imageUrl: _text(json['image_url']),

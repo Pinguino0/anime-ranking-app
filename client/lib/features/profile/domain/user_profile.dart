@@ -80,6 +80,7 @@ class NotificationPreferences {
     this.friends = true,
     this.tournaments = true,
     this.rankChanges = true,
+    this.recommendations = true,
   });
 
   final bool push;
@@ -88,9 +89,18 @@ class NotificationPreferences {
   final bool tournaments;
   final bool rankChanges;
 
+  /// Consigli di visione ricevuti da un gruppo.
+  final bool recommendations;
+
   /// true se e' tutto spento: permette di dire "non disturbare piu'" con un
-  /// solo interruttore invece di cinque.
-  bool get allOff => !push && !votes && !friends && !tournaments && !rankChanges;
+  /// solo interruttore invece di sei.
+  bool get allOff =>
+      !push &&
+      !votes &&
+      !friends &&
+      !tournaments &&
+      !rankChanges &&
+      !recommendations;
 
   NotificationPreferences copyWith({
     bool? push,
@@ -98,6 +108,7 @@ class NotificationPreferences {
     bool? friends,
     bool? tournaments,
     bool? rankChanges,
+    bool? recommendations,
   }) =>
       NotificationPreferences(
         // `?? this.x` invece di un default fisso: `copyWith()` senza argomenti
@@ -107,6 +118,7 @@ class NotificationPreferences {
         friends: friends ?? this.friends,
         tournaments: tournaments ?? this.tournaments,
         rankChanges: rankChanges ?? this.rankChanges,
+        recommendations: recommendations ?? this.recommendations,
       );
 
   factory NotificationPreferences.parse(Map<String, dynamic> json) =>
@@ -116,6 +128,7 @@ class NotificationPreferences {
         friends: json['notify_friends'] as bool? ?? true,
         tournaments: json['notify_tournaments'] as bool? ?? true,
         rankChanges: json['notify_rank_changes'] as bool? ?? true,
+        recommendations: json['notify_recommendations'] as bool? ?? true,
       );
 
   /// Chiavi delle colonne, per non ripetere i nomi a mano in due punti.
@@ -124,6 +137,7 @@ class NotificationPreferences {
   static const String friendsColumn = 'notify_friends';
   static const String tournamentsColumn = 'notify_tournaments';
   static const String rankChangesColumn = 'notify_rank_changes';
+  static const String recommendationsColumn = 'notify_recommendations';
 }
 
 /// Regole sui campi del profilo.

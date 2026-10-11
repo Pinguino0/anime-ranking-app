@@ -13,11 +13,13 @@ import 'helpers/fake_groups.dart';
 
 /// Navigazione della shell da telefono.
 ///
-/// Il crash che questi test coprono: la barra in basso ha quattro sezioni piu'
-/// il profilo, quindi cinque voci. Il profilo pero' e' l'ultima delle sette
-/// sezioni, indice 6. Passare 6 a una barra con cinque destinazioni
-/// fa scattare l'assertion "0 <= selectedIndex < destinations.length" e
-/// chiude l'app nel momento in cui l'utente tocca "Profilo".
+/// La barra in basso ha quattro sezioni piu' la voce "Altro": Duelli, Tornei e
+/// Profilo stanno in un foglio che si apre da li'. Tenere il profilo nella
+/// barra e passare a [ArBottomBar] l'indice di sezione (il profilo e' l'ultima
+/// delle sette, indice 6) faceva scattare l'assertion
+/// "0 <= selectedIndex < destinations.length" e chiudeva l'app. Ora le sezioni
+/// fuori barra fanno capo ad "Altro", che e' l'unica voce da evidenziare,
+/// quindi l'indice resta sempre dentro la lista.
 ///
 /// La barra non e' piu' quella di Material: e' [ArBottomBar], disegnata a mano
 /// con lo stesso contratto. I test ne controllano l'indice, quindi valgono per
@@ -81,20 +83,28 @@ void main() {
     expect(barOf(tester).selectedIndex, inInclusiveRange(0, 4));
   });
 
-  testWidgets('toccare Profilo non chiude l app', (tester) async {
+  testWidgets('toccare Profilo dal foglio Altro non chiude l app', (
+    tester,
+  ) async {
     await pumpShell(tester);
 
+    await tester.tap(find.text('Altro'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Profilo'));
     await tester.pumpAndSettle();
 
     // Nessuna eccezione: qui il test fallirebbe con l'assertion della barra.
-    // Prima della correzione l'indice era 6 su cinque destinazioni.
+    // Prima della correzione l'indice di sezione era 6 su cinque destinazioni.
     expect(barOf(tester).selectedIndex, 4);
   });
 
-  testWidgets('tornare su una sezione con voce ripristina l indice', (tester) async {
+  testWidgets('chiudere una sezione del foglio ripristina l indice', (
+    tester,
+  ) async {
     final router = await pumpShell(tester);
 
+    await tester.tap(find.text('Altro'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Profilo'));
     await tester.pumpAndSettle();
     expect(barOf(tester).selectedIndex, 4);
@@ -136,7 +146,7 @@ void main() {
         'Anime',
         'Gruppi',
         'Classifica',
-        'Watchlist',
+        'La mia lista',
         'Duelli',
         'Tornei',
         'Profilo',
@@ -154,10 +164,19 @@ void main() {
       // solo un elenco di icone e non si sa piu' di che app si tratta.
       await pumpShell(tester, size: const Size(1200, 900));
 
-      final mark = find.descendant(of: find.byType(ArNavRail), matching: find.byType(BrandMark));
+      final mark = find.descendant(
+        of: find.byType(ArNavRail),
+        matching: find.byType(BrandMark),
+      );
       expect(mark, findsOneWidget);
-      expect(find.descendant(of: mark, matching: find.text('Anime')), findsOneWidget);
-      expect(find.descendant(of: mark, matching: find.text('Rank')), findsOneWidget);
+      expect(
+        find.descendant(of: mark, matching: find.text('Anime')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: mark, matching: find.text('Rank')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('toccare una voce la segna come attiva', (tester) async {
@@ -165,13 +184,15 @@ void main() {
 
       expect(railOf(tester).selectedIndex, 0);
 
-      await tester.tap(find.text('Watchlist'));
+      await tester.tap(find.text('La mia lista'));
       await tester.pumpAndSettle();
 
       expect(railOf(tester).selectedIndex, 3);
     });
 
-    testWidgets('su finestra bassa le voci restano raggiungibili', (tester) async {
+    testWidgets('su finestra bassa le voci restano raggiungibili', (
+      tester,
+    ) async {
       // Sette voci piu' il segno non ci starebbero in una colonna fissa: senza
       // scorrimento, l'ultima voce — quella del profilo — verrebbe tagliata via
       // e la sezione aperta sparirebbe dalla navigazione proprio mentre la si
@@ -180,14 +201,20 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(
-        find.descendant(of: find.byType(ArNavRail), matching: find.byType(BrandMark)),
+        find.descendant(
+          of: find.byType(ArNavRail),
+          matching: find.byType(BrandMark),
+        ),
         findsOneWidget,
       );
 
       // La lista da trascinare e' quella dentro la colonna: il contenuto
       // centrale ne ha una sua, e senza il vincolo il trascinamento finirebbe
       // sulla prima incontrata.
-      final voci = find.descendant(of: find.byType(ArNavRail), matching: find.byType(ListView));
+      final voci = find.descendant(
+        of: find.byType(ArNavRail),
+        matching: find.byType(ListView),
+      );
       await tester.drag(voci, const Offset(0, -400));
       await tester.pumpAndSettle();
 

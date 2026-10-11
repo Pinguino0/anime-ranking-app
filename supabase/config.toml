@@ -35,3 +35,14 @@ file_size_limit = "5MiB"
 
 [realtime]
 enabled = true
+
+# ----------------------------------------------------------------------------
+# send-push
+# ----------------------------------------------------------------------------
+# `verify_jwt = false` perche' l'autorizzazione la fa la funzione stessa: la
+# chiama solo il Database Webhook su `notifications`, con la SERVICE ROLE KEY
+# nell'header `Authorization`. Il gateway di Supabase non deve entrare nel
+# merito, e cosi' anche `/health` resta raggiungibile per capire se la funzione
+# e' configurata. Vedi `functions/send-push/index.ts`, `isAuthorized`.
+[functions.send-push]
+verify_jwt = false

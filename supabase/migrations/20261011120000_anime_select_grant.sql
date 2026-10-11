@@ -1,0 +1,27 @@
+-- ---------------------------------------------------------------------------
+-- 20261011120000_anime_select_grant
+--
+-- Ripristina il GRANT SELECT su `anime` per `authenticated`.
+--
+-- Il sintomo: aprendo la watchlist / "La mia lista" l'app mostrava un errore di
+-- permessi ("permission denied for table anime").
+--
+-- La causa e' un'incoerenza fra la 024 e il client. La 024 revoca tutto su
+-- `anime` partendo dall'ipotesi che il catalogo si legga SOLO via RPC
+-- (anime_search, anime_current_season, ...) e si scriva solo dalla Edge
+-- Function. Ma `watchlist_repository.dart` legge l'anime con un join annidato
+-- (`anime:anime_id (...)`) sulla tabella `watchlists`: PostgREST esegue quella
+-- lettura come ruolo `authenticated`, e senza GRANT risponde 42501.
+--
+-- La policy RLS "anime: lettura da autenticati" (`for select using (true)`)
+-- esiste dalla 005, e la 20261004195554 la cita esplicitamente ("le policy su
+-- `anime` sono solo SELECT per `authenticated`"): l'intento e' che gli utenti
+-- autenticati possano leggere il catalogo. Il revoke della 024 era quindi
+-- troppo ampio: la RLS limita le righe, il GRANT le abilita. Serve entrambi.
+--
+-- Il grant e' solo per `authenticated`, mai per `anon`: la policy e' `to
+-- authenticated`, e `assert_no_anon_reads` vigila che `anon` non guadagni
+-- letture. La scrittura resta a `service_role` (unico ruolo che scrive `anime`).
+-- ---------------------------------------------------------------------------
+
+grant select on table public.anime to authenticated;

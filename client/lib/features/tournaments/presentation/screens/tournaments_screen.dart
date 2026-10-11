@@ -276,7 +276,7 @@ class _TournamentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final champion = tournament.championTitle;
+    final champion = tournament.championDisplayTitle;
     final isDone = tournament.isCompleted;
 
     return ArPressable(
@@ -587,11 +587,11 @@ class _CreateTournamentSheetState extends ConsumerState<CreateTournamentSheet> {
                 value: isSelected,
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,
-                title: Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Text(entry.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(_scoreLabel(entry)),
                 secondary: AnimeThumb(
                   url: entry.imageUrl,
-                  title: entry.title,
+                  title: entry.displayTitle,
                   size: 32,
                   radius: ArRadii.chip / 2,
                 ),

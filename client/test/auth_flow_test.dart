@@ -4,6 +4,7 @@ import 'package:animerank/features/auth/data/auth_repository.dart';
 import 'package:animerank/features/auth/presentation/auth_controller.dart';
 import 'package:animerank/features/auth/presentation/screens/login_screen.dart';
 import 'package:animerank/features/auth/presentation/screens/register_screen.dart';
+import 'package:animerank/features/auth/presentation/screens/reset_password_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -194,6 +195,83 @@ void main() {
       final field = tester.widget<TextFormField>(find.byType(TextFormField).at(1));
       final controller = field.controller!;
       expect(controller.text, 'Mario_Rossi');
+    });
+  });
+
+  group('recupero password', () {
+    testWidgets('il link di recupero apre la schermata nuova password',
+        (tester) async {
+      final repo = FakeAuthRepository(session: buildSession());
+      await pumpApp(tester, repository: repo);
+      // Si parte dalla shell perche' la sessione c'e' gia'.
+      expect(find.text('Benvenuto'), findsOneWidget);
+
+      repo.emitPasswordRecovery();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ResetPasswordScreen), findsOneWidget);
+      expect(find.text('Scegli una nuova password'), findsOneWidget);
+    });
+
+    testWidgets('salvata la nuova password si entra nell app', (tester) async {
+      final repo = FakeAuthRepository(session: buildSession());
+      await pumpApp(tester, repository: repo);
+      repo.emitPasswordRecovery();
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).at(0), 'nuovapassword1');
+      await tester.enterText(find.byType(TextFormField).at(1), 'nuovapassword1');
+      await tester.tap(find.widgetWithText(FilledButton, 'Salva la nuova password'));
+      await tester.pumpAndSettle();
+
+      expect(repo.updatePasswordCalls, 1);
+      expect(repo.lastNewPassword, 'nuovapassword1');
+      expect(find.text('Benvenuto'), findsOneWidget);
+    });
+
+    testWidgets('password diverse non chiamano il repository', (tester) async {
+      final repo = FakeAuthRepository(session: buildSession());
+      await pumpApp(tester, repository: repo);
+      repo.emitPasswordRecovery();
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).at(0), 'nuovapassword1');
+      await tester.enterText(find.byType(TextFormField).at(1), 'diversa1');
+      await tester.tap(find.widgetWithText(FilledButton, 'Salva la nuova password'));
+      await tester.pumpAndSettle();
+
+      expect(repo.updatePasswordCalls, 0);
+      expect(find.text('Le due password non coincidono.'), findsOneWidget);
+    });
+
+    testWidgets('un errore del server resta sulla schermata', (tester) async {
+      final repo = FakeAuthRepository(session: buildSession())
+        ..updatePasswordFailure =
+            const AuthFailure('Cambio password non riuscito. Riprova.');
+      await pumpApp(tester, repository: repo);
+      repo.emitPasswordRecovery();
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).at(0), 'nuovapassword1');
+      await tester.enterText(find.byType(TextFormField).at(1), 'nuovapassword1');
+      await tester.tap(find.widgetWithText(FilledButton, 'Salva la nuova password'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Cambio password non riuscito. Riprova.'), findsOneWidget);
+      expect(find.byType(ResetPasswordScreen), findsOneWidget);
+    });
+
+    testWidgets('Non ora chiude la sessione di recupero', (tester) async {
+      final repo = FakeAuthRepository(session: buildSession());
+      await pumpApp(tester, repository: repo);
+      repo.emitPasswordRecovery();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Non ora, torna al login'));
+      await tester.pumpAndSettle();
+
+      expect(repo.signOutCalls, 1);
+      expect(find.byType(LoginScreen), findsOneWidget);
     });
   });
 

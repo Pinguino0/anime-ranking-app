@@ -18,7 +18,8 @@ import 'package:go_router/go_router.dart';
 /// Due percorsi, in quest'ordine:
 ///
 ///  1. il catalogo locale, che e' veloce e funziona senza rete esterna;
-///  2. Jikan, se il primo non trova niente.
+///  2. il catalogo esterno (AniList, con Kitsu come secondo provider), se il
+///     primo non trova niente.
 ///
 /// Il secondo passaggio e' quello che rende il catalogo che si costruisce da
 /// solo: nessuno popola a mano un elenco di migliaia di titoli, e il primo
@@ -208,6 +209,21 @@ class _Top extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(horizontal, ArSpace.sm, horizontal, ArSpace.xs),
       child: Row(
         children: [
+          // L'indietro sta qui e non in un `AppBar` perche' questa schermata
+          // non ne ha: costruisce il suo `Scaffold` con `SafeArea` e basta, e
+          // senza questo pulsante una ricerca aperta dalla home era una strada
+          // a senso unico. L'utente aveva solo il tasto Esc o il gesto di
+          // sistema per tornare indietro.
+          //
+          // Compare solo se c'e' davvero qualcosa da cui tornare: aperta per un
+          // deep link non ha una pagina precedente, e un pulsante che non fa
+          // niente e' peggio di un pulsante assente.
+          if (Navigator.of(context).canPop())
+            IconButton(
+              tooltip: 'Indietro',
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
           Expanded(
             child: TextField(
               controller: controller,
@@ -658,9 +674,9 @@ class _ResultsGrid extends ConsumerWidget {
         SliverToBoxAdapter(
           child: _ListFooter(pagination: pagination, onRetry: onLoadMore),
         ),
-        // Con risultati gia' in lista Jikan non serve: proporre "cerca anche
-        // online" mentre l'utente sta leggendo risultati validi lo
-        // confonderebbe. Compare solo quando la ricerca locale non ha
+        // Con risultati gia' arrivati dal catalogo esterno non serve: proporre
+        // "cerca anche online" mentre l'utente sta leggendo risultati validi
+        // lo confonderebbe. Compare solo quando la ricerca locale non ha
         // prodotto nulla, ed e' [_EmptyResults] a proporlo in quel caso.
         if (controller.query.isEmpty)
           SliverToBoxAdapter(child: _RemoteSuggestion(onTap: onSearchRemote)),
@@ -671,7 +687,7 @@ class _ResultsGrid extends ConsumerWidget {
 
   Widget _card(BuildContext context, AnimeEntry entry) {
     return AnimeCard(
-      title: entry.title,
+      title: entry.displayTitle,
       imageUrl: entry.imageUrl,
       score: entry.score,
       heroTag: entry.heroTag,
@@ -738,7 +754,8 @@ class _ListFooter extends StatelessWidget {
   }
 }
 
-/// Proposta di cercare su Jikan quando il catalogo locale non basta.
+/// Proposta di cercare sul catalogo esterno quando il catalogo locale non
+/// basta.
 class _RemoteSuggestion extends StatelessWidget {
   const _RemoteSuggestion({required this.onTap});
 
@@ -756,7 +773,7 @@ class _RemoteSuggestion extends StatelessWidget {
       child: OutlinedButton.icon(
         onPressed: onTap,
         icon: const Icon(Icons.cloud_download_outlined, size: 18),
-        label: const Text('Cerca anche su Jikan'),
+        label: const Text('Cerca anche online'),
       ),
     );
   }
@@ -839,7 +856,7 @@ class _LoadingGrid extends StatelessWidget {
 /// Tre casi distinti, con messaggi distinti, perche' la soluzione e diversa per
 /// ciascuno:
 ///
-///  - il catalogo e' vuoto: conviene cercare su Jikan;
+///  - il catalogo e' vuoto: conviene cercare sul catalogo esterno;
 ///  - ci sono filtri attivi: il problema sono i filtri, non la ricerca;
 ///  - la ricerca non ha proprio trovato nulla: conviene cambiare parole.
 class _EmptyResults extends ConsumerWidget {
@@ -859,7 +876,7 @@ class _EmptyResults extends ConsumerWidget {
     final hasFilters = controller.hasActiveFilters;
     final hasQuery = controller.query.isNotEmpty;
 
-    // Se c'e' un errore di paginazione (es. ricerca Jikan fallita), mostralo
+    // Se c'e' un errore di paginazione (es. ricerca remota fallita), mostralo
     // anche nello stato vuoto: senza feedback l'utente pensa che il tap non
     // abbia fatto nulla.
     final pageError = pagination.error;
@@ -871,8 +888,8 @@ class _EmptyResults extends ConsumerWidget {
       );
     }
 
-    // Mostra caricamento durante la ricerca remota (Jikan): senza feedback
-    // l'utente non capisce se il tap ha fatto qualcosa.
+    // Mostra caricamento durante la ricerca remota (catalogo esterno): senza
+    // feedback l'utente non capisce se il tap ha fatto qualcosa.
     if (pagination.isLoadingMore && hasQuery) {
       return const Center(
         child: Padding(
@@ -886,7 +903,7 @@ class _EmptyResults extends ConsumerWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               SizedBox(height: ArSpace.md),
-              Text('Cerco su Jikan...'),
+              Text('Cerco online...'),
             ],
           ),
         ),
@@ -932,7 +949,7 @@ class _EmptyResults extends ConsumerWidget {
                         .read(animeSearchProvider.notifier)
                         .searchRemote(forced: true),
                     icon: const Icon(Icons.cloud_download_outlined),
-                    label: const Text('Cerca su Jikan'),
+                    label: const Text('Cerca online'),
                   )
                 : null,
       ),
@@ -1013,10 +1030,15 @@ class AnimeSearchResultCard extends StatelessWidget {
     if (compact) return _compact(context);
 
     return AnimeCard(
-      title: entry.title,
+      title: entry.displayTitle,
       imageUrl: entry.imageUrl,
       score: entry.score,
-      heroTag: entry.heroTag,
+      // Nessun Hero qui. Questa card vive nella striscia dei "recenti", che
+      // convive sulla stessa schermata con `_ResultsGrid`: se anche la griglia
+      // mette l'Hero, un anime presente in entrambe ha due Hero con lo stesso
+      // tag nella stessa rotta e l'animazione va in crash. La griglia dei
+      // risultati tiene l'Hero, questa no.
+      heroTag: null,
       subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
       genres: entry.genres,
       onTap: () => _showDetail(context),
@@ -1033,14 +1055,25 @@ class AnimeSearchResultCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _HeroPoster(
-              url: entry.imageUrl,
-              title: entry.title,
-              tag: entry.heroTag,
+            // La locandina prende lo spazio che resta invece di imporre il 2:3.
+            //
+            // La striscia ha altezza fissa (196) e la card larga 124: un 2:3
+            // rigido misura 186 e con il titolo sfora il contenitore di trenta
+            // pixel, dipingendo le strisce gialle e nere che segnalano il
+            // contenuto tagliato. Qui la locandina cede di qualche pixel e il
+            // titolo non perde una riga: l'overflow sparisce anche con titoli
+            // lunghi e con il testo ingrandito, che sono i due casi in cui
+            // peggiorava.
+            Expanded(
+              child: _HeroPoster(
+                url: entry.imageUrl,
+                title: entry.displayTitle,
+                ratio: null,
+              ),
             ),
             const SizedBox(height: ArSpace.xs),
             Text(
-              entry.title,
+              entry.displayTitle,
               style: theme.textTheme.bodySmall?.copyWith(height: 1.3),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -1075,12 +1108,18 @@ class _HeroPoster extends StatelessWidget {
   const _HeroPoster({
     required this.url,
     required this.title,
-    this.tag,
+    this.ratio = 2 / 3,
   });
 
   final String? url;
   final String title;
-  final Object? tag;
+
+  /// Rapporto della locandina, o `null` per occupare lo spazio disponibile.
+  ///
+  /// Il default e' il 2:3 delle copertine. La versione compatta della card
+  /// passa `null` perche' vive dentro una striscia di altezza fissa, dove
+  /// imporre il rapporto fisso e' quello che faceva traboccare la colonna.
+  final double? ratio;
 
   @override
   Widget build(BuildContext context) {
@@ -1108,7 +1147,7 @@ class _HeroPoster extends StatelessWidget {
         child: Image.network(
           url!,
           // `errorBuilder` copre il caso piu' comune: copertine che non esistono
-          // piu' su MyAnimeList restano nel catalogo con un URL vecchio.
+          // piu' nel catalogo esterno restano in catalogo con un URL vecchio.
           errorBuilder: (context, error, stack) => DecoratedBox(
             decoration: BoxDecoration(
               color: colors.surfaceContainerHighest,
@@ -1124,19 +1163,12 @@ class _HeroPoster extends StatelessWidget {
       );
     }
 
-    // L'hero sta solo sull'immagine. Se avvolgesse anche il segnaposto, la
-    // transizione su un anime senza copertina mostrerebbe un rettangolo vuoto
-    // che si trasforma in un'immagine: peggio di non avere nulla.
-    if (tag == null) return image;
+    final rapporto = ratio;
+    if (rapporto == null) return image;
 
     return AspectRatio(
-      aspectRatio: 2 / 3,
-      child: Hero(
-        tag: tag!,
-        flightShuttleBuilder: (context, animation, direction, from, to) =>
-            ScaleTransition(scale: animation, child: image),
-        child: image,
-      ),
+      aspectRatio: rapporto,
+      child: image,
     );
   }
 }

@@ -78,6 +78,20 @@ void main() {
       expect(entry.hasMyVote, isFalse);
     });
 
+    test('mostra title_it quando c e, altrimenti il titolo del catalogo', () {
+      final withIt = RankingEntry.parse({
+        'anime_id': 'a9',
+        'title': 'Shingeki no Kyojin',
+        'title_it': "L'attacco dei giganti",
+      });
+      expect(withIt.italianTitle, "L'attacco dei giganti");
+      expect(withIt.displayTitle, "L'attacco dei giganti");
+
+      final withoutIt = RankingEntry.parse({'anime_id': 'a10', 'title': 'Naruto'});
+      expect(withoutIt.italianTitle, isNull);
+      expect(withoutIt.displayTitle, 'Naruto');
+    });
+
     test('i numeri postgres arrivano come stringhe o come interi', () {
       // numeric e bigint viaggiano come num nel JSON, ma una versione della
       // libreria puo' consegnarli come testo: senza questa conversione
@@ -125,6 +139,20 @@ void main() {
       expect(voted.valueLabel, ('Voti', '3'));
       expect(voted.secondaryLabel, ('Media', '8.5'));
     });
+
+    test('displayTitle preferisce title_it', () {
+      final withIt = SpecialRankingEntry.parse(
+        {'anime_id': 'a1', 'title': 'X', 'title_it': 'Titolo italiano', 'value': 1, 'secondary': 0},
+        kind: SpecialRankingKind.top,
+      );
+      expect(withIt.displayTitle, 'Titolo italiano');
+
+      final noIt = SpecialRankingEntry.parse(
+        {'anime_id': 'a1', 'title': 'X', 'value': 1, 'secondary': 0},
+        kind: SpecialRankingKind.top,
+      );
+      expect(noIt.displayTitle, 'X');
+    });
   });
 
   group('GroupStats.parse', () {
@@ -158,6 +186,20 @@ void main() {
       expect(stats.topGenre, 'Action');
       expect(stats.scoreDistribution, {7: 10, 8: 12});
       expect(stats.distributionPeak, 12);
+    });
+
+    test('un highlight con title_it mostra il titolo italiano', () {
+      final stats = GroupStats.parse({
+        'member_count': 1,
+        'top_anime': {
+          'anime_id': 'a1',
+          'title': 'Shingeki no Kyojin',
+          'title_it': "L'attacco dei Giganti",
+          'mean': 9.0,
+        },
+      });
+
+      expect(stats.topAnime?.displayTitle, "L'attacco dei Giganti");
     });
 
     test('un jsonb vuoto non produce highlight', () {
@@ -901,6 +943,31 @@ void main() {
       await pump(tester);
 
       expect(find.text('Nessun anime votato in questo gruppo.'), findsOneWidget);
+    });
+
+    testWidgets('il foglio di voto mostra il dominio e riparte da dove si era',
+        (tester) async {
+      await pump(
+        tester,
+        repository: FakeRankingRepository(
+          initial: [buildRankingEntry(title: 'Cowboy Bebop', myScore: 6)],
+        ),
+      );
+
+      // Con un voto gia' dato la riga mostra il numero e non la stella: il
+      // foglio si apre da li' lo stesso.
+      await tester.tap(find.text('6'));
+      await tester.pumpAndSettle();
+
+      // Il numero grande e' il voto di chi guarda: riaprire il foglio per
+      // correggere mezzo punto non deve far partire da 7 un utente che aveva
+      // gia' messo 6.
+      expect(find.text('6'), findsWidgets);
+      // Le due estremita' dicono che il massimo e' 10 e non 100, senza dover
+      // trascinare il cursore in fondo per scoprirlo.
+      expect(find.text('0'), findsOneWidget);
+      expect(find.text('10'), findsOneWidget);
+      expect(find.text('0 = pessimo, 10 = capolavoro.'), findsOneWidget);
     });
 
     testWidgets('la classifica mostra posizione, media e voti', (tester) async {

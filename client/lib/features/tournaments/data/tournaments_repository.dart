@@ -10,7 +10,7 @@ import '../domain/tournaments.dart';
 const String _tournamentSelect = 'id, group_id, name, status, created_by, bracket_size, '
     'champion_anime_id, created_at, completed_at, '
     'creator:created_by ( username ), '
-    'champion:champion_anime_id ( id, title, image_url )';
+    'champion:champion_anime_id ( id, title, title_it, image_url )';
 
 /// Colonne degli scontri, con i due contendenti uniti.
 ///
@@ -18,8 +18,8 @@ const String _tournamentSelect = 'id, group_id, name, status, created_by, bracke
 /// arriva gia' come id e i dati li si sono gia' letti.
 const String _matchSelect = 'id, tournament_id, round_number, match_number, '
     'anime_a_id, anime_b_id, winner_anime_id, status, next_slot, finished_at, '
-    'anime_a:anime_a_id ( id, title, image_url ), '
-    'anime_b:anime_b_id ( id, title, image_url )';
+    'anime_a:anime_a_id ( id, title, title_it, image_url ), '
+    'anime_b:anime_b_id ( id, title, title_it, image_url )';
 
 /// Operazioni sui tornei.
 ///

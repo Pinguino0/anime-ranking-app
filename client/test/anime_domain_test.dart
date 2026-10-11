@@ -79,6 +79,28 @@ void main() {
       expect(entry.canRate, isFalse);
     });
 
+    test('legge il titolo italiano dalla riga della RPC', () {
+      final entry = AnimeEntry.parse({
+        'external_id': '16498',
+        'title': 'Attack on Titan',
+        'title_it': 'L\'attacco dei Giganti',
+      });
+
+      expect(entry.italianTitle, 'L\'attacco dei Giganti');
+      expect(entry.displayTitle, 'L\'attacco dei Giganti');
+    });
+
+    test('un titolo italiano di soli spazi conta come assente', () {
+      final entry = AnimeEntry.parse({
+        'external_id': '16498',
+        'title': 'Attack on Titan',
+        'title_it': '   ',
+      });
+
+      expect(entry.italianTitle, isNull);
+      expect(entry.displayTitle, 'Attack on Titan');
+    });
+
     test('una riga vuota non causa crash e ha un titolo leggibile', () {
       // Meglio "Senza titolo" che un'eccezione che farebbe sparire la lista.
       final entry = AnimeEntry.parse(const {});
@@ -200,6 +222,16 @@ void main() {
     test('isAiringAt: una data di fine futura significa ancora in corso', () {
       final inCorso = animeFixtureFromDomain(airedTo: DateTime(2027, 1, 1));
       expect(inCorso.isAiringAt(DateTime(2026, 10, 1)), isTrue);
+    });
+
+    test('displayTitle preferisce il titolo italiano', () {
+      final conIt = animeFixtureFromDomain(italianTitle: 'L\'attacco dei Giganti');
+      expect(conIt.displayTitle, 'L\'attacco dei Giganti');
+    });
+
+    test('displayTitle senza titolo italiano usa quello del catalogo', () {
+      final senzaIt = animeFixtureFromDomain(italianTitle: null);
+      expect(senzaIt.displayTitle, 'Attack on Titan');
     });
 
     test('sameAs confronta l id esterno, non l interno', () {
@@ -445,6 +477,7 @@ AnimeEntry animeFixtureFromDomain({
   String externalId = '16498',
   String? id = 'uuid-1',
   String title = 'Attack on Titan',
+  String? italianTitle,
   int? episodes = 89,
   int? year = 2013,
   AnimeMediaType? mediaType = AnimeMediaType.tv,
@@ -459,6 +492,7 @@ AnimeEntry animeFixtureFromDomain({
   externalId: externalId,
   id: id,
   title: title,
+  italianTitle: italianTitle,
   episodes: episodes,
   year: year,
   mediaType: mediaType,

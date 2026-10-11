@@ -53,3 +53,27 @@ class AuthController extends Notifier<AuthStatus> {
 
 /// Stato di sessione letto da router e schermate.
 final authStatusProvider = NotifierProvider<AuthController, AuthStatus>(AuthController.new);
+
+/// true mentre l'app e' nel mezzo di un recupero password.
+///
+/// Diventa true quando Supabase apre una sessione da un link di reset. Il
+/// router lo usa per tenere l'utente sulla schermata di cambio password: senza,
+/// l'utente entrerebbe nell'app con la password vecchia ancora valida e il
+/// recupero non servirebbe a niente.
+class PasswordRecoveryController extends Notifier<bool> {
+  @override
+  bool build() {
+    final repo = ref.watch(authRepositoryProvider);
+    final subscription = repo.watchPasswordRecovery().listen((_) => state = true);
+    ref.onDispose(subscription.cancel);
+    return false;
+  }
+
+  /// Chiude il recupero: da qui in poi valgono le regole normali di sessione.
+  void finish() => state = false;
+}
+
+final passwordRecoveryPendingProvider =
+    NotifierProvider<PasswordRecoveryController, bool>(
+  PasswordRecoveryController.new,
+);

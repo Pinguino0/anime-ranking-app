@@ -56,6 +56,7 @@ class Tournament {
     this.creatorName,
     this.championAnimeId,
     this.championTitle,
+    this.championTitleIt,
     this.championImageUrl,
     this.createdAt,
     this.completedAt,
@@ -70,11 +71,18 @@ class Tournament {
   final String? creatorName;
   final String? championAnimeId;
   final String? championTitle;
+
+  /// Titolo italiano del campione, se il catalogo lo conosce.
+  final String? championTitleIt;
   final String? championImageUrl;
   final DateTime? createdAt;
   final DateTime? completedAt;
 
   bool get isCompleted => status == TournamentStatus.completed;
+
+  /// Nome del campione da mostrare: italiano se disponibile, altrimenti il
+  /// titolo del catalogo.
+  String? get championDisplayTitle => championTitleIt ?? championTitle;
 
   /// Numero di round del bracket: il log2 della dimensione.
   ///
@@ -104,6 +112,7 @@ class Tournament {
       creatorName: _text(creator['username']),
       championAnimeId: _text(json['champion_anime_id']),
       championTitle: _text(champion['title']),
+      championTitleIt: _text(champion['title_it']),
       championImageUrl: _text(champion['image_url']),
       createdAt: _date(json['created_at']),
       completedAt: _date(json['completed_at']),
@@ -127,6 +136,8 @@ class TournamentMatch {
     this.animeBId,
     this.animeATitle,
     this.animeBTitle,
+    this.animeATitleIt,
+    this.animeBTitleIt,
     this.animeAImageUrl,
     this.animeBImageUrl,
     this.winnerAnimeId,
@@ -143,6 +154,10 @@ class TournamentMatch {
   final String? animeBId;
   final String? animeATitle;
   final String? animeBTitle;
+
+  /// Titoli italiani dei due contendenti, se il catalogo li conosce.
+  final String? animeATitleIt;
+  final String? animeBTitleIt;
   final String? animeAImageUrl;
   final String? animeBImageUrl;
   final String? winnerAnimeId;
@@ -150,6 +165,12 @@ class TournamentMatch {
   final int? nextSlot;
 
   bool get isFinished => status == TournamentMatchStatus.finished;
+
+  /// Titolo mostrato per il primo contendente: italiano se disponibile.
+  String? get animeADisplayTitle => animeATitleIt ?? animeATitle;
+
+  /// Titolo mostrato per il secondo contendente: italiano se disponibile.
+  String? get animeBDisplayTitle => animeBTitleIt ?? animeBTitle;
 
   /// Entrambi i contendenti ci sono: e' l'unico caso in cui si puo' votare.
   ///
@@ -178,6 +199,8 @@ class TournamentMatch {
       animeBId: _text(json['anime_b_id']),
       animeATitle: _text(animeA['title']),
       animeBTitle: _text(animeB['title']),
+      animeATitleIt: _text(animeA['title_it']),
+      animeBTitleIt: _text(animeB['title_it']),
       animeAImageUrl: _text(animeA['image_url']),
       animeBImageUrl: _text(animeB['image_url']),
       winnerAnimeId: _text(json['winner_anime_id']),
@@ -276,6 +299,7 @@ class TournamentStanding {
     required this.isOut,
     required this.matchesWon,
     required this.votesReceived,
+    this.italianTitle,
     this.imageUrl,
   });
 
@@ -284,11 +308,19 @@ class TournamentStanding {
   final bool isOut;
   final int matchesWon;
   final int votesReceived;
+
+  /// Titolo italiano, se il catalogo lo conosce. La UI usa [displayTitle].
+  final String? italianTitle;
   final String? imageUrl;
+
+  /// Titolo mostrato all'utente: italiano se disponibile, altrimenti il titolo
+  /// del catalogo.
+  String get displayTitle => italianTitle ?? title;
 
   factory TournamentStanding.parse(Map<String, dynamic> json) => TournamentStanding(
         animeId: _text(json['anime_id']) ?? '',
         title: _text(json['title']) ?? 'Senza titolo',
+        italianTitle: _text(json['title_it']),
         // Postgres restituisce un boolean come `true`/`false` via PostgREST,
         // ma una colonna boolean puo' arrivare come stringa se letta da un
         // join testuale: `isOut` deve essere un booleano anche in quel caso.

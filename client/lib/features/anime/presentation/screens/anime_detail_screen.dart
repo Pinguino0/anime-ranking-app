@@ -2,13 +2,24 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/transitions.dart';
+import '../../../groups/domain/group.dart';
+import '../../../groups/presentation/groups_controller.dart';
+import '../../../ranking/domain/ranking.dart';
+import '../../../ranking/presentation/ranking_controller.dart';
+import '../../../ranking/presentation/widgets/rate_sheet.dart';
+import '../../../watchlist/domain/watchlist.dart';
+import '../../../watchlist/presentation/watchlist_controller.dart';
+import '../../../watchlist/presentation/widgets/recommend_sheet.dart';
 import '../../domain/anime.dart';
+import '../anime_controller.dart';
 
 /// Scheda di un anime, a tutta pagina.
 ///
@@ -26,7 +37,7 @@ import '../../domain/anime.dart';
 /// dettaglio da chiamare. La scheda mostra quello che il risultato di ricerca
 /// contiene gia', il che e' anche il comportamento giusto per un'app che deve
 /// aprire la pagina offline.
-class AnimeDetailScreen extends StatelessWidget {
+class AnimeDetailScreen extends ConsumerWidget {
   const AnimeDetailScreen({
     required this.entry,
     this.heroTag,
@@ -40,7 +51,7 @@ class AnimeDetailScreen extends StatelessWidget {
   final Object? heroTag;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final size = Breakpoints.fromContext(context);
 
     // Su telefono il poster e il titolo restano incolonnati, con il poster
@@ -86,8 +97,12 @@ class AnimeDetailScreen extends StatelessWidget {
                 SliverToBoxAdapter(child: _Actions(entry: entry)),
                 SliverToBoxAdapter(child: _Facts(entry: entry)),
                 SliverToBoxAdapter(child: _Genres(entry: entry)),
+                if (entry.id != null)
+                  SliverToBoxAdapter(child: _Relations(animeId: entry.id!)),
                 if (entry.synopsis != null)
                   SliverToBoxAdapter(child: _Synopsis(entry: entry)),
+                if (entry.id != null)
+                  SliverToBoxAdapter(child: _WatchOrder(animeId: entry.id!)),
                 SliverToBoxAdapter(
                   child: SizedBox(
                     height: ArSpace.xxl + ArSpace.lg,
@@ -120,7 +135,7 @@ class _Backdrop extends StatelessWidget {
       decoration: const BoxDecoration(gradient: ArColors.subtle),
       child: Center(
         child: Text(
-          entry.title.characters.firstOrNull?.toUpperCase() ?? '?',
+          entry.displayTitle.characters.firstOrNull?.toUpperCase() ?? '?',
           style: TextStyle(
             fontFamily: AppTheme.displayFont,
             fontSize: 160,
@@ -195,7 +210,7 @@ class _TopBar extends StatelessWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'Il trailer si apre dal collegato su MyAnimeList.',
+          'Il trailer si apre dal collegato sul catalogo.',
         ),
       ),
     );
@@ -308,7 +323,7 @@ class _Poster extends StatelessWidget {
         color: colors.surfaceContainerHigh,
         child: Center(
           child: Text(
-            entry.title.characters.firstOrNull?.toUpperCase() ?? '?',
+            entry.displayTitle.characters.firstOrNull?.toUpperCase() ?? '?',
             style: TextStyle(
               fontFamily: AppTheme.displayFont,
               fontSize: 44,
@@ -374,8 +389,8 @@ class _Headline extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Il nome dell'archivio MyAnimeList in maiuscoletto: dice da dove
-          // viene l'opera, che altrimenti un utente nuovo non saprebbe.
+          // Il nome dell'archivio del catalogo esterno in maiuscoletto: dice da
+          // dove viene l'opera, che altrimenti un utente nuovo non saprebbe.
           if (entry.status != null)
             Padding(
               padding: const EdgeInsets.only(bottom: ArSpace.xs),
@@ -397,7 +412,7 @@ class _Headline extends StatelessWidget {
               ),
             ),
           Text(
-            entry.title,
+            entry.displayTitle,
             style: theme.textTheme.headlineMedium?.copyWith(
               // Ombra piu' forte del normale perche' il testo e' sopra
               // l'immagine, non sopra il nero della app.
@@ -439,7 +454,7 @@ class _Headline extends StatelessWidget {
       };
 }
 
-/// Voto MyAnimeList con il numero di votanti.
+/// Voto del catalogo esterno con il numero di votanti.
 ///
 /// Il numero dei votanti sta in piccolo sotto la media perche' 8,4 su 40 e
 /// 8,4 su 800.000 non sono la stessa valutazione: senza il conteggio, la
@@ -550,17 +565,16 @@ class _FactsInline extends StatelessWidget {
 
 /// Azioni principali.
 ///
-/// Solo votazione e watchlist, e solo se c'e' un gruppo. La scheda non puo'
-/// chiedere quale gruppo usare — non lo sa — quindi il pulsante porta al
-/// selettore invece di fingere di sapere. Il testo lo dice, cosi' il passaggio
-/// non sembra un errore.
-class _Actions extends StatelessWidget {
+/// Solo votazione e watchlist, e solo se c'e' un gruppo. La scheda non sa in
+/// quale gruppo contare il voto, quindi lo chiede: con un solo gruppo non c'e'
+/// niente da decidere e si va diretti al foglio del voto.
+class _Actions extends ConsumerWidget {
   const _Actions({required this.entry});
 
   final AnimeEntry entry;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
 
     return Padding(
@@ -580,12 +594,42 @@ class _Actions extends StatelessWidget {
             ArGradientButton(
               label: 'Vota in un gruppo',
               icon: Icons.star_outline_rounded,
-              onPressed: () => _pickGroup(context),
+              onPressed: () => _vote(context, ref),
             ),
             const SizedBox(height: ArSpace.xs),
             Text(
               'Le classifiche sono per gruppo: scegli dove contare questo voto.',
               style: theme.textTheme.bodySmall,
+            ),
+          ],
+          // Salvare e consigliare, sopra "Guarda": sono gesti che si compiono
+          // una volta e poi restano, mentre guardare e' cio' che resta da fare.
+          if (entry.id != null) ...[
+            const SizedBox(height: ArSpace.md),
+            Row(
+              children: [
+                Expanded(
+                  child: _SecondaryAction(
+                    icon: Icons.bookmark_add_outlined,
+                    label: 'Nella mia lista',
+                    onPressed: () => _savePersonal(context, ref),
+                  ),
+                ),
+                const SizedBox(width: ArSpace.xs),
+                Expanded(
+                  child: _SecondaryAction(
+                    icon: Icons.group_add_outlined,
+                    label: 'Nel gruppo',
+                    onPressed: () => _saveGroup(context, ref),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: ArSpace.xs),
+            _SecondaryAction(
+              icon: Icons.recommend_outlined,
+              label: 'Consiglia a un gruppo',
+              onPressed: () => _recommend(context, ref),
             ),
           ],
           // Gli episodi stanno sotto il voto e non al suo posto: votare e'
@@ -603,20 +647,257 @@ class _Actions extends StatelessWidget {
     );
   }
 
-  void _pickGroup(BuildContext context) {
-    // Il percorso del selettore e' quello dichiarato dal router: scriverlo
-    // qui a mano farebbe divergere le due copie al primo rename.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text(
-          'Scegli il gruppo dalla barra in basso, poi apri la classifica.',
+  /// Chiede il gruppo e poi il voto, e salva.
+  ///
+  /// L'ordine non si puo' invertire: il foglio del voto scrive in un gruppo,
+  /// quindi il gruppo e' la prima cosa che serve. Chi annulla la scelta del
+  /// gruppo non vede mai il cursore, cosi' non prova a votare e poi scopre che
+  /// mancava un passaggio.
+  Future<void> _vote(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    final group = await _pickGroup(context, ref);
+    if (group == null || !context.mounted) return;
+
+    final score = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => RateSheet(entry: _asRankingEntry()),
+    );
+    if (score == null || !context.mounted) return;
+
+    try {
+      await ref.read(ratingProvider.notifier).rate(
+        groupId: group.id,
+        animeId: entry.id!,
+        score: score,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Voto di ${formatVote(score)} salvato in ${group.name}.'),
         ),
-        backgroundColor: theme(context).colorScheme.surfaceContainerHigh,
+      );
+    } on RankingFailure catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Il gruppo in cui contare il voto.
+  ///
+  /// L'elenco puo' non essere ancora caricato: in quel caso si aspetta il
+  /// risultato invece di ripiegare su "nessun gruppo", che darebbe un messaggio
+  /// falso a chi i gruppi ce li ha.
+  Future<AnimeGroup?> _pickGroup(BuildContext context, WidgetRef ref) async {
+    final cached = ref.read(groupsListProvider).value;
+    if (cached != null) return _choose(context, cached);
+
+    final List<AnimeGroup> groups;
+    try {
+      groups = await ref.read(groupsListProvider.future);
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Non riesco a leggere i tuoi gruppi: $error')),
+        );
+      }
+      return null;
+    }
+
+    if (!context.mounted) return null;
+    return _choose(context, groups);
+  }
+
+  Future<AnimeGroup?> _choose(BuildContext context, List<AnimeGroup> groups) async {
+    if (groups.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Non fai parte di nessun gruppo: creane uno o entra con un '
+              'codice invito per votare.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+
+    // Un solo gruppo: chiedere "dove" con una sola risposta e' un tocco inutile.
+    if (groups.length == 1) return groups.first;
+
+    return showModalBottomSheet<AnimeGroup>(
+      context: context,
+      builder: (_) => _GroupChooser(groups: groups),
+    );
+  }
+
+  /// Il voto vive in una classifica, ma il foglio del voto ha bisogno di una
+  /// [RankingEntry]: qui se ne costruisce una con i dati che la scheda ha gia'.
+  /// Salva l'anime nella watchlist personale.
+  Future<void> _savePersonal(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await ref.read(watchlistActionProvider.notifier).setStatus(
+            animeId: entry.id!,
+            status: WatchStatus.planned,
+          );
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Aggiunto alla tua lista.')),
+      );
+    } on WatchlistFailure catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Salva l'anime nella watchlist condivisa di un gruppo.
+  Future<void> _saveGroup(BuildContext context, WidgetRef ref) async {
+    final group = await _pickGroup(context, ref);
+    if (group == null || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await ref.read(watchlistActionProvider.notifier).setStatus(
+            groupId: group.id,
+            animeId: entry.id!,
+            status: WatchStatus.planned,
+          );
+      messenger.showSnackBar(
+        SnackBar(content: Text('Aggiunto alla watchlist di ${group.name}.')),
+      );
+    } on WatchlistFailure catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Consiglia l'anime a un gruppo o a una persona.
+  ///
+  /// Il gruppo si sceglie prima, come per il voto: il consiglio vive in un
+  /// gruppo e senza quello non c'e' un elenco di destinatari.
+  Future<void> _recommend(BuildContext context, WidgetRef ref) async {
+    final group = await _pickGroup(context, ref);
+    if (group == null || !context.mounted) return;
+
+    final List<GroupMember> members;
+    try {
+      members = await ref.read(groupMembersProvider(group.id).future);
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Non riesco a leggere i membri: $error')),
+        );
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    // Non ci si consiglia un anime da soli: il database lo rifiuterebbe e
+    // proporre il proprio nome sarebbe un errore scoperto a cose fatte.
+    final me = ref.read(watchlistRepositoryProvider).currentUserId;
+    final others = [
+      for (final member in members)
+        if (member.userId != me) member,
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => RecommendSheet(
+        groupId: group.id,
+        animeId: entry.id!,
+        animeTitle: entry.displayTitle,
+        members: others,
       ),
     );
   }
 
-  static ThemeData theme(BuildContext context) => Theme.of(context);
+  RankingEntry _asRankingEntry() => RankingEntry(
+    position: 0,
+    animeId: entry.id!,
+    title: entry.title,
+    italianTitle: entry.italianTitle,
+    imageUrl: entry.imageUrl,
+    genres: entry.genres,
+  );
+}
+
+/// Scelta del gruppo in cui contare un voto.
+///
+/// Un foglio e non una schermata: la scelta e' breve e il suo esito e' il
+/// foglio del voto, quindi mandare l'utente su un'altra pagina lo farebbe
+/// tornare indietro subito.
+class _GroupChooser extends StatelessWidget {
+  const _GroupChooser({required this.groups});
+
+  final List<AnimeGroup> groups;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+              child: Text(
+                'Dove contare il voto?',
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+            for (final group in groups)
+              ListTile(
+                leading: const Icon(Icons.groups_outlined),
+                title: Text(group.name),
+                subtitle: Text(group.subtitle),
+                onTap: () => Navigator.of(context).pop(group),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Azione secondaria della scheda anime (salva, consiglia).
+///
+/// Bordo e non fondo pieno: il gradiente resta al voto, che e' l'azione
+/// principale. Larghezza piena perche' due pulsanti affiancati che non
+/// riempiono la riga sembrano disallineati rispetto al resto della scheda.
+class _SecondaryAction extends StatelessWidget {
+  const _SecondaryAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(ArRadii.control),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Pulsante "Guarda" che porta alla visione degli episodi.
@@ -637,7 +918,7 @@ class _WatchButton extends StatelessWidget {
     return ArPressable(
       onTap: () => context.push(
         AppRoutes.firstEpisode(entry.id!),
-        extra: entry.title,
+        extra: entry.displayTitle,
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -898,9 +1179,10 @@ class _GenreChip extends StatelessWidget {
 
 /// Trama, con i primi caratteri esposti.
 ///
-/// La trama su MyAnimeList arriva spesso con il markup `[Written by MAL Rewrite]`
-/// in fondo: viene ripulito qui perche' altrimenti l'ultima riga della pagina
-/// sarebbe una nota del sito che non c'entra con l'opera.
+/// La trama del catalogo esterno arriva spesso con il markup `[Written by MAL
+/// Rewrite]` in fondo: e' una nota di MyAnimeList che some fonti del catalogo
+/// riportano ancora. Viene ripulita qui perche' altrimenti l'ultima riga della
+/// pagina sarebbe una nota del sito che non c'entra con l'opera.
 class _Synopsis extends StatelessWidget {
   const _Synopsis({required this.entry});
 
@@ -914,7 +1196,7 @@ class _Synopsis extends StatelessWidget {
   /// il blocco riconosciuto come nota del sito, che e' quello che non
   /// descrive l'anime.
   ///
-  /// Il testo di MAL arriva in forme leggermente diverse ("[Written by MAL
+  /// Il blocco arriva in forme leggermente diverse ("[Written by MAL
   /// Rewrite]", con o senza spazi), quindi il confronto ignora gli spazi
   /// invece di cercare la stringa esatta.
   static final _rewriteNote = RegExp(
@@ -991,6 +1273,333 @@ class _Synopsis extends StatelessWidget {
   }
 }
 
+/// "Da dove iniziare": l'intera saga in ordine di uscita.
+///
+/// Compare sotto la trama e solo quando la catena ha piu' di un'opera: con una
+/// sola voce non c'e' nessun ordine da comunicare, e la sezione sarebbe un
+/// riquadro che ripete il titolo gia' in cima alla scheda. In caricamento o in
+/// errore la sezione non c'e': e' un di piu', e uno scheletro al suo posto
+/// direbbe che qualcosa si e' rotto.
+class _WatchOrder extends ConsumerWidget {
+  const _WatchOrder({required this.animeId});
+
+  final String animeId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(watchOrderProvider(animeId));
+    final items = async.asData?.value ?? const <WatchOrderItem>[];
+
+    if (items.length < 2) return const SizedBox.shrink();
+
+    final size = Breakpoints.fromContext(context);
+
+    return Padding(
+      padding: EdgeInsets.only(
+        top: ArSpace.lg,
+        left: size.isCompact ? ArSpace.md : ArSpace.lg,
+        right: size.isCompact ? ArSpace.md : ArSpace.lg,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionLabel('Da dove iniziare'),
+          const SizedBox(height: ArSpace.xs),
+          Text(
+            'Ordine di visione consigliato',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: ArSpace.sm),
+          // Scorrimento orizzontale con una Row, come i correlati: la catena
+          // tipica ha poche voci, e cosi' l'altezza la detta il contenuto
+          // invece di una misura fissa che va in overflow col testo grande.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const SizedBox(width: ArSpace.sm),
+                  _WatchOrderCard(item: items[i]),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Una tappa dell'ordine di visione: numero, poster, titolo, anno.
+///
+/// Sulla prima opera c'e' l'etichetta "Inizia da qui": e' l'unica informazione
+/// che l'utente cerca davvero quando apre una scheda di meta' saga.
+class _WatchOrderCard extends StatelessWidget {
+  const _WatchOrderCard({required this.item});
+
+  final WatchOrderItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final entry = item.entry;
+
+    Widget image;
+    if (entry.imageUrl == null || entry.imageUrl!.isEmpty) {
+      image = ColoredBox(
+        color: colors.surfaceContainerHigh,
+        child: Center(
+          child: Icon(
+            Icons.movie_outlined,
+            color: colors.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+        ),
+      );
+    } else {
+      image = CachedNetworkImage(
+        imageUrl: entry.imageUrl!,
+        fit: BoxFit.cover,
+        placeholder: (_, _) => ColoredBox(color: colors.surfaceContainerHigh),
+        errorWidget: (_, _, _) => ColoredBox(color: colors.surfaceContainerHigh),
+      );
+    }
+
+    return SizedBox(
+      width: 128,
+      child: ArPressable(
+        // Stessa rotta delle card correlate: la scheda della tappa si apre
+        // sopra questa, quindi "indietro" torna all'opera di partenza.
+        onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(ArRadii.card),
+              child: AspectRatio(
+                aspectRatio: 2 / 3,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    DecoratedBox(
+                      decoration: const BoxDecoration(boxShadow: ArShadows.card),
+                      child: image,
+                    ),
+                    Positioned(
+                      top: ArSpace.xs,
+                      left: ArSpace.xs,
+                      child: _StepBadge(position: item.position),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: ArSpace.xs),
+            if (item.isStart) ...[
+              const _RelationChip(label: 'Inizia da qui'),
+              const SizedBox(height: ArSpace.xxs),
+            ],
+            Text(
+              entry.displayTitle,
+              style: theme.textTheme.bodyMedium,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (entry.year != null)
+              Text('${entry.year}', style: theme.textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Il numero della tappa, sopra il poster.
+class _StepBadge extends StatelessWidget {
+  const _StepBadge({required this.position});
+
+  final int position;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Container(
+      width: 24,
+      height: 24,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: 0.85),
+        shape: BoxShape.circle,
+        border: Border.all(color: colors.primary.withValues(alpha: 0.5)),
+      ),
+      child: Text(
+        '$position',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: colors.primary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Sequel, prequel e altre opere correlate, da AniList.
+///
+/// Compare solo per gli anime gia' in catalogo (le relazioni si importano solo
+/// per quelli) e solo se ce n'e' almeno una "utile": una sezione vuota
+/// lascerebbe uno spazio senza spiegazione. In caricamento o in errore la
+/// sezione semplicemente non c'e' — e' accessoria, e mostrare uno scheletro o
+/// un messaggio per lei darebbe l'idea che qualcosa sia rotto.
+class _Relations extends ConsumerWidget {
+  const _Relations({required this.animeId});
+
+  final String animeId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(relatedAnimeProvider(animeId));
+    final items = async.asData?.value
+            .where((related) => related.isMeaningful)
+            .toList(growable: false) ??
+        const <RelatedAnime>[];
+
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final size = Breakpoints.fromContext(context);
+
+    return Padding(
+      padding: EdgeInsets.only(
+        top: ArSpace.lg,
+        left: size.isCompact ? ArSpace.md : ArSpace.lg,
+        right: size.isCompact ? ArSpace.md : ArSpace.lg,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionLabel('Correlati'),
+          const SizedBox(height: ArSpace.sm),
+          // Scorrimento orizzontale con una Row e non una lista virtualizzata:
+          // le relazioni "utili" sono poche per opera, quindi non serve
+          // riciclare le righe, e cosi' l'altezza la detta il contenuto invece
+          // di una misura fissa che andrebbe in overflow col testo grande.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const SizedBox(width: ArSpace.sm),
+                  _RelationCard(related: items[i]),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Una card di opera correlata: poster, tipo di relazione, titolo, anno.
+class _RelationCard extends StatelessWidget {
+  const _RelationCard({required this.related});
+
+  final RelatedAnime related;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final entry = related.entry;
+
+    Widget image;
+    if (entry.imageUrl == null || entry.imageUrl!.isEmpty) {
+      image = ColoredBox(
+        color: colors.surfaceContainerHigh,
+        child: Center(
+          child: Icon(
+            Icons.movie_outlined,
+            color: colors.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+        ),
+      );
+    } else {
+      image = CachedNetworkImage(
+        imageUrl: entry.imageUrl!,
+        fit: BoxFit.cover,
+        placeholder: (_, _) => ColoredBox(color: colors.surfaceContainerHigh),
+        errorWidget: (_, _, _) => ColoredBox(color: colors.surfaceContainerHigh),
+      );
+    }
+
+    return SizedBox(
+      width: 128,
+      child: ArPressable(
+        // Stessa rotta della card da ricerca: la scheda correlata si apre sopra
+        // quella corrente, quindi "indietro" torna all'opera di partenza.
+        onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(ArRadii.card),
+              child: AspectRatio(
+                aspectRatio: 2 / 3,
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(boxShadow: ArShadows.card),
+                  child: image,
+                ),
+              ),
+            ),
+            const SizedBox(height: ArSpace.xs),
+            _RelationChip(label: related.relationLabel),
+            const SizedBox(height: ArSpace.xxs),
+            Text(
+              entry.displayTitle,
+              style: theme.textTheme.bodyMedium,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (entry.year != null)
+              Text('${entry.year}', style: theme.textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Pastiglia con il tipo di relazione.
+class _RelationChip extends StatelessWidget {
+  const _RelationChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.primary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(ArRadii.chip),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(color: color),
+      ),
+    );
+  }
+}
+
 /// Titolo di sezione.
 ///
 /// Maiuscoletto spaziato: e' il tratto che separa un blocco di contenuto dal
@@ -1002,6 +1611,25 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text.toUpperCase(), style: Theme.of(context).textTheme.labelSmall);
+    // Stesso filetto delle intestazioni di sezione: la scheda anime eredita la
+    // tinta della sezione da cui e' stata aperta (oro dalla classifica, blu
+    // dalla watchlist) senza doverla dichiarare, perche' la shell la mette
+    // nell'ambiente. Fuori da una shell resta il gradiente del marchio.
+    final accent = SectionAccentScope.of(context);
+
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 14,
+          margin: const EdgeInsets.only(right: ArSpace.xs),
+          decoration: BoxDecoration(
+            gradient: accent.gradient,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Text(text.toUpperCase(), style: Theme.of(context).textTheme.labelSmall),
+      ],
+    );
   }
 }

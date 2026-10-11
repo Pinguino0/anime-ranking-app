@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/error/app_failure.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
 import '../../../../core/ui/transitions.dart';
@@ -327,43 +328,58 @@ class _BodyState extends ConsumerState<_Body> {
     // sinistra, i campi a destra. Sotto, una colonna sola — a 700px due colonne
     // darebbero campi larghi 300px accanto a un banner di 250px, e nessuno dei
     // due avrebbe piu' spazio di quanto ne aveva nel layout a colonna singola.
-    final children = widget.size.isExpanded
-        ? [
-            Expanded(
-              flex: 5,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  hero,
-                  const SizedBox(height: ArSpace.xl),
-                  sessionSection,
-                ],
+    // Da 900px in su due colonne vere: il banner profilo e la sessione a
+    // sinistra, i campi a destra. Sotto, una colonna sola — a 700px due colonne
+    // darebbero campi larghi 300px accanto a un banner di 250px, e nessuno dei
+    // due avrebbe piu' spazio di quanto ne aveva nel layout a colonna singola.
+    //
+    // Le due colonne stanno in una `Row` e non in una `Column`: `Expanded`
+    // dentro una colonna distribuirebbe l'altezza, e dentro uno scroll
+    // l'altezza e' infinita, quindi Flutter non saprebbe quanto spazio dare.
+    // Su schermo largo la schermata restava nera per intero.
+    final content = widget.size.isExpanded
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    hero,
+                    const SizedBox(height: ArSpace.xl),
+                    sessionSection,
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: ArSpace.xl),
-            Expanded(
-              flex: 6,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ...feedback,
-                  editSection,
-                  const SizedBox(height: ArSpace.lg),
-                  settingsSection,
-                ],
+              const SizedBox(width: ArSpace.xl),
+              Expanded(
+                flex: 6,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ...feedback,
+                    editSection,
+                    const SizedBox(height: ArSpace.lg),
+                    settingsSection,
+                  ],
+                ),
               ),
-            ),
-          ]
-        : <Widget>[
-            hero,
-            const SizedBox(height: ArSpace.xl),
-            ...feedback,
-            editSection,
-            const SizedBox(height: ArSpace.lg),
-            settingsSection,
-            const SizedBox(height: ArSpace.lg),
-            sessionSection,
-          ];
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              hero,
+              const SizedBox(height: ArSpace.xl),
+              ...feedback,
+              editSection,
+              const SizedBox(height: ArSpace.lg),
+              settingsSection,
+              const SizedBox(height: ArSpace.lg),
+              sessionSection,
+            ],
+          );
 
     // `SingleChildScrollView` e non `ListView`: con la tastiera aperta la
     // `ListView` dimensiona lo scroll sul viewport che vede, che con
@@ -376,10 +392,7 @@ class _BodyState extends ConsumerState<_Body> {
         page.right,
         ArSpace.xxl,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
-      ),
+      child: content,
     );
   }
 
@@ -548,6 +561,10 @@ class _ActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // L'icona prende la tinta della sezione: nel profilo e' il viola chiaro
+    // dell'account. Fuori da una shell resta il viola del marchio, che e' quello
+    // di prima.
+    final tint = SectionAccentScope.of(context).base;
 
     return ArPressable(
       onTap: onTap,
@@ -558,7 +575,7 @@ class _ActionRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: context.colors.primary),
+            Icon(icon, size: 20, color: tint),
             const SizedBox(width: ArSpace.md),
             Expanded(
               child: Text(label, style: theme.textTheme.titleMedium),

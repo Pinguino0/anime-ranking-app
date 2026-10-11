@@ -39,6 +39,32 @@ void main() {
       expect(tournament.createdAt, DateTime.utc(2026, 1, 2, 3, 4, 5));
     });
 
+    test('il campione mostra il titolo italiano quando c e', () {
+      final withIt = Tournament.parse({
+        'id': 't1',
+        'group_id': 'g1',
+        'name': 'Coppa',
+        'status': 'completed',
+        'bracket_size': 4,
+        'champion_anime_id': 'a1',
+        'champion': {'title': 'Shingeki no Kyojin', 'title_it': "L'attacco dei giganti"},
+      });
+      expect(withIt.championTitleIt, "L'attacco dei giganti");
+      expect(withIt.championDisplayTitle, "L'attacco dei giganti");
+
+      final noIt = Tournament.parse({
+        'id': 't1',
+        'group_id': 'g1',
+        'name': 'Coppa',
+        'status': 'completed',
+        'bracket_size': 4,
+        'champion_anime_id': 'a1',
+        'champion': {'title': 'Cowboy Bebop'},
+      });
+      expect(noIt.championTitleIt, isNull);
+      expect(noIt.championDisplayTitle, 'Cowboy Bebop');
+    });
+
     test('senza campione il torneo non e concluso', () {
       final tournament = Tournament.parse({
         'id': 't1',
@@ -110,6 +136,22 @@ void main() {
       // Solo il primo turno ha i contendenti: gli altri sono generati vuoti e
       // non si possono votare.
       expect(bracket.openMatches, 2);
+    });
+
+    test('i contendenti mostrano il titolo italiano quando c e', () {
+      final match = TournamentMatch.parse({
+        'id': 'm1',
+        'round_number': 1,
+        'match_number': 1,
+        'status': 'pending',
+        'anime_a_id': 'a1',
+        'anime_b_id': 'a2',
+        'anime_a': {'title': 'Shingeki no Kyojin', 'title_it': "L'attacco dei giganti"},
+        'anime_b': {'title': 'Trigun'},
+      });
+
+      expect(match.animeADisplayTitle, "L'attacco dei giganti");
+      expect(match.animeBDisplayTitle, 'Trigun');
     });
 
     test('il nome del turno usa la posizione nel bracket', () {
@@ -316,6 +358,19 @@ void main() {
       expect(standing.title, 'Senza titolo');
       expect(standing.isOut, isFalse);
       expect(standing.matchesWon, 0);
+    });
+
+    test('displayTitle preferisce title_it', () {
+      final withIt = TournamentStanding.parse({
+        'anime_id': 'a1',
+        'title': 'Shingeki no Kyojin',
+        'title_it': "L'attacco dei giganti",
+      });
+      expect(withIt.italianTitle, "L'attacco dei giganti");
+      expect(withIt.displayTitle, "L'attacco dei giganti");
+
+      final noIt = TournamentStanding.parse({'anime_id': 'a1', 'title': 'Trigun'});
+      expect(noIt.displayTitle, 'Trigun');
     });
   });
 

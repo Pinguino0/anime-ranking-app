@@ -51,7 +51,24 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     final groupId = widget.groupId;
     final state = ref.watch(watchlistProvider(groupId));
     final totals = ref.watch(watchlistTotalsProvider(groupId)).value;
-    final entries = _visible(state.value ?? const <WatchlistEntry>[]);
+    final all = state.value ?? const <WatchlistEntry>[];
+
+    // La lista di gruppo e' "consigliata da tutti": le voci proprie si
+    // gestiscono (stato, episodi, preferito), quelle degli altri si mostrano
+    // come consigli, in sola lettura.
+    final mine = _visible(all.where((e) => e.isMine).toList());
+
+    final recommendations =
+        ref.watch(groupRecommendationsProvider(groupId)).value ??
+            const <AnimeRecommendation>[];
+    final recommended = _recommended(
+      all.where((e) => !e.isMine).toList(),
+      recommendations,
+      // I filtri riguardano la propria lista: con un filtro attivo i consigli
+      // degli altri sparirebbero senza motivo e confonderebbero il risultato.
+      enabled: _status == null && !_favoritesOnly,
+    );
+
     final expanded = Breakpoints.fromContext(context).isExpanded;
 
     return Scaffold(
@@ -102,7 +119,7 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
               // Il filtro e' applicato anche quando non c'e' niente da
               // mostrare: con il filtro attivo l elenco vuoto e' la risposta
               // ("non hai preferiti"), non un caricamento da rifare.
-              data: (_) => entries.isEmpty
+              data: (_) => mine.isEmpty && recommended.isEmpty
                   ? EmptyState(
                       icon: _favoritesOnly
                           ? Icons.star_border
@@ -114,22 +131,14 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                       onRefresh: () =>
                           ref.read(watchlistProvider(groupId).notifier).refresh(),
                       child: expanded
-                          ? SingleChildScrollView(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: ArSpace.sm,
-                              ),
-                              child: WatchlistTable(
-                                entries: entries,
-                                groupId: groupId,
-                              ),
-                            )
+                          ? _expandedList(context, ref, mine, recommended)
                           : ListView(
                               padding: EdgeInsets.only(
                                 left: ArSpace.page(context).left,
                                 right: ArSpace.page(context).right,
                                 bottom: ArSpace.xxl,
                               ),
-                              children: _cards(context, ref, entries),
+                              children: _cards(context, ref, mine, recommended),
                             ),
                     ),
             ),
@@ -174,64 +183,61 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     // giusto mentre si guarda qualcosa. Per l elenco piatto dei preferiti
     // l ordine alfabetico: sono titoli da ritrovare, non da finire.
     if (_status != null || _favoritesOnly) {
-      filtered.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      filtered.sort((a, b) => a.displayTitle.toLowerCase().compareTo(b.displayTitle.toLowerCase()));
     }
 
     return filtered;
   }
 
-  /// Schede con le intestazioni di stato, per il formato a lista.
-  List<Widget> _cards(BuildContext context, WidgetRef ref, List<WatchlistEntry> entries) {
+  /// Schede della lista: prima i consigli degli altri membri, poi la propria
+  /// lista divisa per stato.
+  List<Widget> _cards(
+    BuildContext context,
+    WidgetRef ref,
+    List<WatchlistEntry> mine,
+    List<_Recommended> recommended,
+  ) {
     final groupId = widget.groupId;
+    final widgets = <Widget>[];
 
-    if (_status != null || _favoritesOnly) {
-      return [
-        for (final (i, entry) in entries.indexed)
-          WatchlistRow(entry: entry, groupId: groupId, revealMs: _delayOf(i)),
-      ];
+    if (recommended.isNotEmpty) {
+      widgets.add(_sectionHeader(
+        context,
+        label: 'Consigliati dal gruppo',
+        color: ArColors.primary,
+        count: recommended.length,
+      ));
+      widgets.addAll([
+        for (final item in recommended)
+          _RecommendedCard(item: item, groupId: groupId),
+      ]);
     }
 
-    final widgets = <Widget>[];
+    // Con un filtro attivo niente intestazioni di stato: le righe sono poche e
+    // gia' omogenee, e il filtro e' la risposta alla domanda "cosa cerco".
+    if (_status != null || _favoritesOnly) {
+      widgets.addAll([
+        for (final (i, entry) in mine.indexed)
+          WatchlistRow(entry: entry, groupId: groupId, revealMs: _delayOf(i)),
+      ]);
+      return widgets;
+    }
 
     // L'indice corre su tutte le righe, non dentro ogni gruppo: l'onda deve
     // attraversare la pagina, altrimenti le intestazioni di stato ripartono
     // da capo e la lista sembra spezzata in tre elenchi.
-    var seen = 0;
+    var seen = recommended.length;
 
     for (final status in WatchStatus.displayOrder) {
-      final rows = entries.where((e) => e.status == status).toList();
+      final rows = mine.where((e) => e.status == status).toList();
       if (rows.isEmpty) continue;
 
-      widgets.add(
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            ArSpace.page(context).left,
-            ArSpace.md,
-            ArSpace.page(context).right,
-            ArSpace.xs,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: statusColor(status),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: ArSpace.xs),
-              Expanded(
-                child: Text(
-                  status.label,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-              MetricLabel('${rows.length}'),
-            ],
-          ),
-        ),
-      );
+      widgets.add(_sectionHeader(
+        context,
+        label: status.label,
+        color: statusColor(status),
+        count: rows.length,
+      ));
 
       widgets.addAll([
         for (final entry in rows)
@@ -244,6 +250,116 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     }
 
     return widgets;
+  }
+
+  /// Intestazione di una sezione della lista (stato o consigli).
+  Widget _sectionHeader(
+    BuildContext context, {
+    required String label,
+    required Color color,
+    int? count,
+  }) =>
+      Padding(
+        padding: EdgeInsets.fromLTRB(
+          ArSpace.page(context).left,
+          ArSpace.md,
+          ArSpace.page(context).right,
+          ArSpace.xs,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: ArSpace.xs),
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+            if (count != null) MetricLabel('$count'),
+          ],
+        ),
+      );
+
+  /// Vista a schermo largo: i consigli in alto e la propria lista in tabella.
+  ///
+  /// La tabella gestisce stato, episodi e preferito, cioe' le sole voci che si
+  /// possono modificare; i consigli degli altri membri non hanno controlli e
+  /// starebbero male in colonne vuote.
+  Widget _expandedList(
+    BuildContext context,
+    WidgetRef ref,
+    List<WatchlistEntry> mine,
+    List<_Recommended> recommended,
+  ) =>
+      SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: ArSpace.sm),
+        child: Column(
+          children: [
+            if (recommended.isNotEmpty) ...[
+              _sectionHeader(
+                context,
+                label: 'Consigliati dal gruppo',
+                color: ArColors.primary,
+                count: recommended.length,
+              ),
+              for (final item in recommended)
+                _RecommendedCard(item: item, groupId: widget.groupId),
+              const SizedBox(height: ArSpace.md),
+            ],
+            if (mine.isNotEmpty)
+              WatchlistTable(entries: mine, groupId: widget.groupId),
+          ],
+        ),
+      );
+
+  /// Unisce le voci degli altri membri per anime.
+  ///
+  /// Lo stesso anime puo' essere nella lista di piu' persone: mostrarne una
+  /// scheda per membro riempirebbe la pagina di duplicati. Qui diventa una
+  /// scheda sola con tutti i nomi di chi lo consiglia.
+  List<_Recommended> _recommended(
+    List<WatchlistEntry> others,
+    List<AnimeRecommendation> recommendations, {
+    required bool enabled,
+  }) {
+    if (!enabled || others.isEmpty) return const [];
+
+    final byAnime = <String, _Recommended>{};
+
+    for (final entry in others) {
+      final item = byAnime.putIfAbsent(entry.animeId, () => _Recommended(entry));
+      final name = entry.userName?.isNotEmpty == true ? entry.userName! : 'Un membro';
+      // Un messaggio non vuoto non viene sovrascritto da uno assente.
+      final message = entry.message;
+      item.authors.putIfAbsent(
+        name,
+        () => (message?.isNotEmpty == true ? message : null),
+      );
+    }
+
+    // I consigli mirati aggiungono il destinatario: la riga di watchlist dice
+    // chi consiglia, non a chi.
+    for (final rec in recommendations) {
+      if (rec.forEveryone) continue;
+      final item = byAnime[rec.animeId];
+      if (item == null) continue;
+
+      final who = rec.fromUserName.isNotEmpty ? rec.fromUserName : 'Un membro';
+      final to = rec.toUserName?.isNotEmpty == true ? rec.toUserName! : 'un membro';
+      item.targets.add('Per $to - da $who');
+    }
+
+    return byAnime.values.toList()
+      ..sort(
+        (a, b) => a.entry.displayTitle
+            .toLowerCase()
+            .compareTo(b.entry.displayTitle.toLowerCase()),
+      );
   }
 
   /// Ritardo di comparsa della riga numero [index].
@@ -301,6 +417,7 @@ Color statusColor(WatchStatus status) => switch (status) {
 AnimeEntry _animeOf(WatchlistEntry entry) => AnimeEntry(
       externalId: entry.animeId,
       title: entry.title,
+      italianTitle: entry.italianTitle,
       imageUrl: entry.imageUrl,
       episodes: entry.episodes,
       year: entry.year,
@@ -527,7 +644,9 @@ class WatchlistTable extends ConsumerWidget {
   const WatchlistTable({required this.entries, required this.groupId, super.key});
 
   final List<WatchlistEntry> entries;
-  final String groupId;
+
+  /// Gruppo della watchlist mostrata; `null` per quella personale.
+  final String? groupId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -565,7 +684,7 @@ class WatchlistTable extends ConsumerWidget {
                     children: [
                       AnimeThumb(
                         url: entry.imageUrl,
-                        title: entry.title,
+                        title: entry.displayTitle,
                         size: 44,
                         radius: ArRadii.chip,
                       ),
@@ -600,16 +719,16 @@ class WatchlistTable extends ConsumerWidget {
 
   Future<void> _remove(BuildContext context, WidgetRef ref, WatchlistEntry entry) async {
     final messenger = ScaffoldMessenger.of(context);
-    final confirmed = await _confirmRemove(context, entry.title);
+    final confirmed = await _confirmRemove(context, entry.displayTitle);
 
     if (confirmed != true || !context.mounted) return;
 
     try {
       await ref.read(watchlistActionProvider.notifier).remove(
-            groupId: entry.groupId.isEmpty ? groupId : entry.groupId,
+            groupId: entry.groupId ?? groupId,
             animeId: entry.animeId,
           );
-      messenger.showSnackBar(SnackBar(content: Text('${entry.title} rimosso dalla watchlist.')));
+      messenger.showSnackBar(SnackBar(content: Text('${entry.displayTitle} rimosso dalla watchlist.')));
     } on WatchlistFailure catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
@@ -624,13 +743,20 @@ class WatchlistTable extends ConsumerWidget {
 class WatchlistRow extends StatelessWidget {
   const WatchlistRow({
     required this.entry,
-    required this.groupId,
+    this.groupId,
+    this.groupName,
     this.revealMs = 0,
     super.key,
   });
 
   final WatchlistEntry entry;
-  final String groupId;
+
+  /// Gruppo della voce; `null` per la watchlist personale.
+  final String? groupId;
+
+  /// Nome del gruppo a cui appartiene la voce. Serve alla watchlist di gruppo
+  /// quando mostra anche le voci consigliate dagli altri membri.
+  final String? groupName;
 
   /// Ritardo di comparsa, per l'onda della lista.
   final int revealMs;
@@ -663,13 +789,13 @@ class WatchlistRow extends StatelessWidget {
             children: [
               AnimeThumb(
                 url: entry.imageUrl,
-                title: entry.title,
+                title: entry.displayTitle,
                 size: 52,
                 radius: ArRadii.chip,
                 heroTag: anime.heroTag,
               ),
               const SizedBox(width: ArSpace.sm),
-              Expanded(child: _AnimeLine(entry: entry)),
+              Expanded(child: _AnimeLine(entry: entry, groupName: groupName)),
               const SizedBox(width: ArSpace.xs),
               _FavoriteButton(entry: entry, groupId: groupId),
               _OverflowMenu(entry: entry, groupId: groupId),
@@ -704,6 +830,147 @@ class WatchlistRow extends StatelessWidget {
   }
 }
 
+/// Un anime consigliato da altri membri del gruppo.
+///
+/// Aggrega per anime le voci che non sono dell'utente: `authors` tiene chi lo
+/// consiglia (con l'eventuale messaggio), `targets` i consigli mirati a una
+/// persona.
+class _Recommended {
+  _Recommended(this.entry);
+
+  /// Voce rappresentativa, con i dati dell'anime da mostrare.
+  final WatchlistEntry entry;
+
+  /// Chi lo consiglia, con l'eventuale messaggio: nome -> messaggio.
+  final Map<String, String?> authors = {};
+
+  /// Righe "per ... - da ..." dei consigli mirati.
+  final List<String> targets = [];
+}
+
+/// Scheda di un anime consigliato da altri membri del gruppo.
+///
+/// In sola lettura per stato ed episodi: sono di chi l'ha messo in lista, non
+/// di chi guarda. L'unica azione e' aggiungerlo alla propria lista.
+class _RecommendedCard extends ConsumerWidget {
+  const _RecommendedCard({required this.item, required this.groupId});
+
+  final _Recommended item;
+  final String groupId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final entry = item.entry;
+    final authors = item.authors;
+    final saving = ref.watch(watchlistActionProvider).isLoading;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: ArSpace.xxs),
+      child: ArPressable(
+        onTap: () => context.push(
+          AppRoutes.animeDetail,
+          extra: _animeOf(entry),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(ArSpace.sm),
+          decoration: BoxDecoration(
+            color: ArColors.container,
+            borderRadius: BorderRadius.circular(ArRadii.card),
+            // Verde d'accento invece del filetto di stato: qui lo stato non
+            // c'e' (la voce non e' la propria), quello che conta e' che si
+            // tratta di un consiglio.
+            border: Border.all(
+              color: ArColors.primary.withValues(alpha: 0.24),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AnimeThumb(
+                    url: entry.imageUrl,
+                    title: entry.displayTitle,
+                    size: 52,
+                    radius: ArRadii.chip,
+                  ),
+                  const SizedBox(width: ArSpace.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.displayTitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: ArSpace.xxs),
+                        Text(
+                          'Consigliato da ${authors.keys.join(', ')}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: ArColors.textMid),
+                        ),
+                        for (final target in item.targets)
+                          Padding(
+                            padding: const EdgeInsets.only(top: ArSpace.xxs),
+                            child: Text(
+                              target,
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(color: ArColors.textMid),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              for (final author in authors.entries)
+                if (author.value?.isNotEmpty == true)
+                  Padding(
+                    padding: const EdgeInsets.only(top: ArSpace.xs),
+                    child: Text(
+                      '"${author.value}" - ${author.key}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: saving ? null : () => _add(context, ref),
+                  icon: const Icon(Icons.playlist_add),
+                  label: const Text('Aggiungi alla lista'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _add(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await ref.read(watchlistActionProvider.notifier).setStatus(
+            groupId: groupId,
+            animeId: item.entry.animeId,
+            status: WatchStatus.planned,
+          );
+      messenger.showSnackBar(
+        SnackBar(content: Text('${item.entry.displayTitle} aggiunto alla lista.')),
+      );
+    } on WatchlistFailure catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+}
+
 /// Barra di avanzamento sugli episodi.
 ///
 /// La traccia resta in un colore spento perche' e' il massimo possibile, e il
@@ -735,21 +1002,26 @@ class _ProgressBar extends StatelessWidget {
 /// una watchlist, e chiedere un tocco per sapere se un anime e' finito o
 /// abbandonato significa non poterla usare come lista.
 class _AnimeLine extends StatelessWidget {
-  const _AnimeLine({required this.entry});
+  const _AnimeLine({required this.entry, this.groupName});
 
   final WatchlistEntry entry;
+  final String? groupName;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final meta = entry.meta;
+    final group = groupName;
+    final meta = [
+      if (group != null && group.isNotEmpty) group,
+      if (entry.meta.isNotEmpty) entry.meta,
+    ].join(' · ');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          entry.title,
+          entry.displayTitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.titleSmall,
@@ -811,7 +1083,7 @@ List<PopupMenuItem<String>> _statusItems(WatchStatus current) => [
 Future<void> _saveStatus(
   BuildContext context,
   WidgetRef ref, {
-  required String groupId,
+  required String? groupId,
   required String animeId,
   required WatchStatus status,
 }) async {
@@ -841,7 +1113,7 @@ class _StatusChip extends ConsumerWidget {
   const _StatusChip({required this.entry, required this.groupId});
 
   final WatchlistEntry entry;
-  final String groupId;
+  final String? groupId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -911,7 +1183,7 @@ class _StatusMenu extends ConsumerWidget {
   const _StatusMenu({required this.entry, required this.groupId});
 
   final WatchlistEntry entry;
-  final String groupId;
+  final String? groupId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -962,7 +1234,7 @@ class _FavoriteButton extends ConsumerWidget {
   const _FavoriteButton({required this.entry, required this.groupId});
 
   final WatchlistEntry entry;
-  final String groupId;
+  final String? groupId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -997,7 +1269,7 @@ class _EpisodeButton extends ConsumerWidget {
   const _EpisodeButton({required this.entry, required this.groupId});
 
   final WatchlistEntry entry;
-  final String groupId;
+  final String? groupId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1043,7 +1315,7 @@ class _OverflowMenu extends ConsumerWidget {
   const _OverflowMenu({required this.entry, required this.groupId});
 
   final WatchlistEntry entry;
-  final String groupId;
+  final String? groupId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1092,7 +1364,7 @@ class _OverflowMenu extends ConsumerWidget {
 
   Future<void> _remove(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
-    final confirmed = await _confirmRemove(context, entry.title);
+    final confirmed = await _confirmRemove(context, entry.displayTitle);
 
     if (confirmed != true || !context.mounted) return;
 
@@ -1102,7 +1374,7 @@ class _OverflowMenu extends ConsumerWidget {
             animeId: entry.animeId,
           );
       messenger.showSnackBar(
-        SnackBar(content: Text('${entry.title} rimosso dalla watchlist.')),
+        SnackBar(content: Text('${entry.displayTitle} rimosso dalla watchlist.')),
       );
     } on WatchlistFailure catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
@@ -1181,7 +1453,7 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
           Text('Episodi guardati', style: theme.textTheme.titleLarge),
           const SizedBox(height: ArSpace.xxs),
           Text(
-            widget.entry.title,
+            widget.entry.displayTitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textMid),
@@ -1215,6 +1487,11 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
           ),
           if (total > 0) ...[
             const SizedBox(height: ArSpace.xs),
+            // Qui il numero NON e' quello di `ArSlider`: l'apparecchio ha gia'
+            // la sua riga "3 / 24" con i due pulsanti ai lati, e mettergli
+            // sopra un altro numero grande lo farebbe leggere due volte la
+            // stessa cosa. Il valore che si prende da `ArSlider` e' solo la
+            // posizione del cursore.
             Slider(
               value: _episode.toDouble().clamp(0, total.toDouble()),
               max: total.toDouble(),
@@ -1224,6 +1501,16 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
                 _episode = value.round();
                 _error = null;
               }),
+            ),
+            // Le estremita' sotto al cursore: con un anime da 1500 episodi il
+            // numero in fondo a destra e' l'unico modo di sapere dove ci si
+            // trova senza trascinare il cursore in fondo per ricominciare.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('0', style: theme.textTheme.labelMedium),
+                Text('$total', style: theme.textTheme.labelMedium),
+              ],
             ),
           ],
           if (_error != null)
@@ -1274,9 +1561,17 @@ class _EpisodeSheetState extends State<EpisodeSheet> {
 /// watchlist a ogni inserimento e per un istante i pallini "gia aggiunto"
 /// sparirebbero, facendo sembrare che l'aggiunta non sia avvenuta.
 class AddFromRankingSheet extends ConsumerStatefulWidget {
-  const AddFromRankingSheet({required this.groupId, super.key});
+  const AddFromRankingSheet({
+    required this.groupId,
+    this.personal = false,
+    super.key,
+  });
 
+  /// Gruppo di cui si mostra la classifica come suggerimento.
   final String groupId;
+
+  /// true quando l'aggiunta va nella watchlist personale invece che nel gruppo.
+  final bool personal;
 
   @override
   ConsumerState<AddFromRankingSheet> createState() => _AddFromRankingSheetState();
@@ -1291,7 +1586,10 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
     final page = ArSpace.page(context);
     final ranking = ref.watch(rankingProvider(widget.groupId));
     final existing = {
-      for (final e in ref.watch(watchlistProvider(widget.groupId)).value ?? const [])
+      for (final e in (widget.personal
+              ? ref.watch(myListProvider).value
+              : ref.watch(watchlistProvider(widget.groupId)).value) ??
+          const <WatchlistEntry>[])
         e.animeId,
     };
 
@@ -1393,9 +1691,9 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
                             _added.contains(row.animeId);
 
                         return ListTile(
-                          leading: AnimeThumb(url: row.imageUrl, title: row.title),
+                          leading: AnimeThumb(url: row.imageUrl, title: row.displayTitle),
                           title: Text(
-                            row.title,
+                            row.displayTitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1403,9 +1701,9 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
                           trailing: already
                               ? const Icon(Icons.check_circle, color: ArColors.completed)
                               : IconButton(
-                                  tooltip: 'Aggiungi ${row.title}',
+                                  tooltip: 'Aggiungi ${row.displayTitle}',
                                   icon: const Icon(Icons.add_circle_outline),
-                                  onPressed: () => _add(row.animeId, row.title),
+                                  onPressed: () => _add(row.animeId, row.displayTitle),
                                 ),
                         );
                       },
@@ -1425,7 +1723,7 @@ class _AddFromRankingSheetState extends ConsumerState<AddFromRankingSheet> {
 
     try {
       await ref.read(watchlistActionProvider.notifier).setStatus(
-            groupId: widget.groupId,
+            groupId: widget.personal ? null : widget.groupId,
             animeId: animeId,
             status: WatchStatus.watching,
           );

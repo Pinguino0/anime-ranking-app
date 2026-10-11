@@ -16,6 +16,10 @@ supabase/apply_all.sql
 *.key
 service_role*
 sb_secret_*
+# Cartella dei segreti locali (es. la service account FCM). La uso io per
+# leggere le chiavi una volta e caricarli come secret Supabase: il contenuto
+# non deve mai finire nel repo.
+.secrets/
 
 # ---- Flutter / Dart ----
 client/.dart_tool/

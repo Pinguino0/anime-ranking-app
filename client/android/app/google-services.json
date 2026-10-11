@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "210569688870",
+    "project_id": "animerank-4b0e2",
+    "storage_bucket": "animerank-4b0e2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:210569688870:android:a24b5030a4d57b67abb3e7",
+        "android_client_info": {
+          "package_name": "com.animerank.animerank"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD23wO4NMTGHnoirlz-SDRcaCpjvf49LZo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

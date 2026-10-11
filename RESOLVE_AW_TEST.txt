@@ -1,0 +1,17 @@
+﻿Conclusione test extractor
+
+- Extractor locale: OK (health 200)
+- Tunnel quick: nuovo URL https://program-state-invention-created.trycloudflare.com (va aggiornato in GENERIC_PROVIDER_ENDPOINT/secret su Supabase se EF lo usa)
+- POST /extract AW: risponde 200 per tutti i test (AOT, Re:Zero S3 sub/ita, S4 sub). Restituisce URL mp4/HLS Sweetpixel validi.
+- AnimeWorld NON è il problema: il parser funziona correttamente.
+
+Quindi il blocco "fonti non si risolvono" per alcuni anime è probabilmente:
+1. EF punta a vecchio URL tunnel (scaduto/cambiato) → timeouts/errore di connessione verso extractor
+2. Timeout lato EF/Client (richiesta lenta) → tradotto in messaggio generico
+3. Fonti placeholder/duplicate (AU .so/-x) provate prima e causano ritardi/fallback confuso
+
+Fix immediati:
+- Aggiornare GENERIC_PROVIDER_ENDPOINT su Supabase Edge Function (secrets) con nuovo tunnel URL
+- Riavviare extractor+tunnel con URL noto e aggiornare EF
+- Pulire fonti placeholder (-x) in DB (disattivare/eliminare)
+- Migliorare log/gestione errori in resolve-source per distinguere timeout vs parser error

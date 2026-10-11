@@ -1,7 +1,9 @@
 import 'package:animerank/core/theme/app_theme.dart';
 import 'package:animerank/features/anime/domain/anime.dart';
+import 'package:animerank/features/anime/presentation/anime_controller.dart';
 import 'package:animerank/features/anime/presentation/screens/anime_detail_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers/fake_anime.dart';
@@ -17,13 +19,26 @@ import 'helpers/fake_anime.dart';
 /// il layout leggendo il `MediaQuery`, quindi un contenitore stretto dentro uno
 /// schermo largo la farebbe disporre come se fosse desktop e il poster
 /// occuperebbe 220px invece di 132, sbordando.
-Widget _host(AnimeEntry entry, {Size size = const Size(400, 800)}) {
-  return MaterialApp(
-    theme: AppTheme.dark,
-    home: MediaQuery(
-      data: MediaQueryData(size: size),
-      child: Scaffold(
-        body: AnimeDetailScreen(entry: entry),
+Widget _host(
+  AnimeEntry entry, {
+  Size size = const Size(400, 800),
+  FakeAnimeRepository? repository,
+}) {
+  return ProviderScope(
+    overrides: [
+      // La scheda legge le opere correlate (sequel/prequel) da qui: senza il
+      // repository il provider esplode e la pagina non si disegna.
+      animeRepositoryProvider.overrideWithValue(
+        repository ?? FakeAnimeRepository(),
+      ),
+    ],
+    child: MaterialApp(
+      theme: AppTheme.dark,
+      home: MediaQuery(
+        data: MediaQueryData(size: size),
+        child: Scaffold(
+          body: AnimeDetailScreen(entry: entry),
+        ),
       ),
     ),
   );
@@ -164,21 +179,26 @@ void main() {
       var chiusa = false;
 
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.dark,
-          home: Scaffold(
-            body: Builder(
-              builder: (context) => Center(
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => AnimeDetailScreen(
-                        entry: animeFixture(),
-                        heroTag: 'x',
+        ProviderScope(
+          overrides: [
+            animeRepositoryProvider.overrideWithValue(FakeAnimeRepository()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.dark,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => Center(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => AnimeDetailScreen(
+                          entry: animeFixture(),
+                          heroTag: 'x',
+                        ),
                       ),
                     ),
+                    child: const Text('apri'),
                   ),
-                  child: const Text('apri'),
                 ),
               ),
             ),
@@ -195,6 +215,75 @@ void main() {
 
       chiusa = find.text('apri').evaluate().isNotEmpty;
       expect(chiusa, isTrue, reason: 'la pagina precedente deve riapparire');
+    });
+
+    testWidgets('con una saga mostra "Da dove iniziare" con la prima opera', (
+      tester,
+    ) async {
+      final repository = FakeAnimeRepository()
+        ..watchOrderResult = [
+          WatchOrderItem(
+            position: 1,
+            isStart: true,
+            entry: animeFixture(externalId: '10', title: 'Prima stagione'),
+          ),
+          WatchOrderItem(
+            position: 2,
+            isStart: false,
+            entry: animeFixture(externalId: '11', title: 'Seconda stagione'),
+          ),
+          WatchOrderItem(
+            position: 3,
+            isStart: false,
+            entry: animeFixture(externalId: '12', title: 'Terza stagione'),
+          ),
+        ];
+
+      await tester.pumpWidget(
+        _host(
+          animeFixture(synopsis: 'Una saga lunga.', title: 'La saga'),
+          repository: repository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await _scrollTo(tester, find.text('DA DOVE INIZIARE'));
+
+      expect(repository.watchOrderCalls, 1);
+      expect(find.text('DA DOVE INIZIARE'), findsOneWidget);
+      expect(find.text('Ordine di visione consigliato'), findsOneWidget);
+      // Il badge sta solo sulla prima: e' quella da cui cominciare.
+      expect(find.text('Inizia da qui'), findsOneWidget);
+      expect(find.text('Prima stagione'), findsOneWidget);
+      expect(find.text('Seconda stagione'), findsOneWidget);
+      expect(find.text('Terza stagione'), findsOneWidget);
+    });
+
+    testWidgets('senza una catena la sezione non compare', (tester) async {
+      // Una voce sola non e' un ordine: mostrarla ripeterebbe il titolo che e'
+      // gia' in cima alla scheda.
+      final repository = FakeAnimeRepository()
+        ..watchOrderResult = [
+          WatchOrderItem(
+            position: 1,
+            isStart: true,
+            entry: animeFixture(externalId: '10', title: 'Unica opera'),
+          ),
+        ];
+
+      await tester.pumpWidget(
+        _host(
+          animeFixture(synopsis: 'Nessuna saga.', title: 'Opera singola'),
+          repository: repository,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('DA DOVE INIZIARE'), findsNothing);
+      expect(find.text('Inizia da qui'), findsNothing);
     });
   });
 

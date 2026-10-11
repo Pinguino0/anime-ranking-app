@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/anime_thumb.dart';
 import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
@@ -61,6 +62,8 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
     final bracket = ref.watch(tournamentBracketProvider(widget.tournamentId));
     final tournament = bracket.value?.tournament;
     final page = ArSpace.page(context);
+    // L'accento della sezione: nei tornei e' l'arancione del tabellone.
+    final accent = SectionAccentScope.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -84,6 +87,8 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
         ],
         bottom: TabBar(
           controller: _tabs,
+          indicatorColor: accent.base,
+          labelColor: accent.base,
           tabs: const [
             Tab(text: 'Tabellone'),
             Tab(text: 'Classifica'),
@@ -412,7 +417,7 @@ class _MatchCard extends StatelessWidget {
         child: Column(
           children: [
             _ContenderRow(
-              title: match.animeATitle,
+              title: match.animeADisplayTitle,
               imageUrl: match.animeAImageUrl,
               votes: counts.votesFor(match, match.animeAId),
               isWinner: match.isWinner(match.animeAId),
@@ -424,7 +429,7 @@ class _MatchCard extends StatelessWidget {
             ),
             const Divider(height: 1),
             _ContenderRow(
-              title: match.animeBTitle,
+              title: match.animeBDisplayTitle,
               imageUrl: match.animeBImageUrl,
               votes: counts.votesFor(match, match.animeBId),
               isWinner: match.isWinner(match.animeBId),
@@ -635,7 +640,7 @@ class _ChampionBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final champion = tournament.championTitle;
+    final champion = tournament.championDisplayTitle;
     final turns = '${tournament.bracketSize} anime · '
         '${tournament.rounds} ${tournament.rounds == 1 ? "turno" : "turni"}';
 
@@ -766,14 +771,14 @@ class _StandingsTab extends ConsumerWidget {
                       children: [
                         AnimeThumb(
                           url: rows[i].imageUrl,
-                          title: rows[i].title,
+                          title: rows[i].displayTitle,
                           size: 32,
                           radius: ArRadii.chip / 2,
                         ),
                         const SizedBox(width: ArSpace.sm),
                         ConstrainedBox(
                           constraints: const BoxConstraints(minWidth: 160, maxWidth: 280),
-                          child: Text(rows[i].title, overflow: TextOverflow.ellipsis),
+                          child: Text(rows[i].displayTitle, overflow: TextOverflow.ellipsis),
                         ),
                       ],
                     ),
@@ -827,7 +832,7 @@ class _StandingsTab extends ConsumerWidget {
                 const SizedBox(width: ArSpace.xs),
                 AnimeThumb(
                   url: row.imageUrl,
-                  title: row.title,
+                  title: row.displayTitle,
                   size: 40,
                   radius: ArRadii.chip,
                 ),
@@ -837,7 +842,7 @@ class _StandingsTab extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        row.title,
+                        row.displayTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall,

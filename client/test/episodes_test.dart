@@ -1,8 +1,10 @@
 import 'package:animerank/core/theme/app_theme.dart';
+import 'package:animerank/core/ui/section_header.dart';
 import 'package:animerank/features/episodes/data/episodes_repository.dart';
 import 'package:animerank/features/episodes/domain/episode.dart';
 import 'package:animerank/features/episodes/presentation/episodes_controller.dart';
 import 'package:animerank/features/episodes/presentation/screens/episode_screen.dart';
+import 'package:animerank/features/episodes/presentation/widgets/episode_player.dart';
 import 'package:animerank/features/episodes/presentation/widgets/episode_rating_bar.dart';
 import 'package:animerank/features/episodes/presentation/widgets/episode_tile.dart';
 import 'package:flutter/material.dart';
@@ -13,10 +15,11 @@ import 'helpers/fake_episodes.dart';
 
 /// Schermata di visione con il repository finto.
 ///
-/// Il player vero non parte in un test: `video_player` chiama un plugin che
-/// nei test non e' registrato, quindi [EpisodePlayer] cade sulla sua scheda di
-/// errore. Va bene perche' quello che qui si verifica e' tutto il resto della
-/// pagina — titolo, elenco, voto — e il player ha gia' i suoi test.
+/// Il player vero non parte in un test: `media_kit` carica librerie native che
+/// nei test non ci sono, quindi [EpisodePlayer] cade sulla sua scheda di errore.
+/// Va bene perche' quello che qui si verifica e' tutto il resto della pagina —
+/// titolo, elenco, voto — e il player ha i suoi test separati, sulla parte che
+/// non richiede il decoder.
 Widget _host(FakeEpisodesRepository repository, {String? episodeId}) {
   return ProviderScope(
     overrides: [episodesRepositoryProvider.overrideWithValue(repository)],
@@ -25,6 +28,43 @@ Widget _host(FakeEpisodesRepository repository, {String? episodeId}) {
       home: MediaQuery(
         data: const MediaQueryData(size: Size(400, 900)),
         child: EpisodeScreen(animeId: 'anime-1', episodeId: episodeId),
+      ),
+    ),
+  );
+}
+
+/// Player isolato, con un resolver che si puo' sostituire.
+///
+/// Il player vero non parte in un test: `media_kit` carica librerie native che
+/// nei test non ci sono, quindi [EpisodePlayer] cade sulla scheda di errore. Va
+/// bene perche' quello che qui si verifica e' la parte *prima* del player — se
+/// la risoluzione parte, se scade, se il fallback va avanti — e quella e' tutta
+/// logica Dart, niente native.
+///
+/// [onResolved] riceve l'id di ogni fonte per cui il resolver e' stato
+/// chiamato: serve a distinguere "ha risolto" da "ha aperto", che in un test
+/// senza player vero non sono la stessa cosa.
+Widget _playerHost({
+  required List<EpisodeSource> sources,
+  SourceResolver? resolve,
+  void Function(String sourceId)? onResolved,
+  void Function(int index)? onSourceChanged,
+}) {
+  return MaterialApp(
+    theme: AppTheme.dark,
+    home: MediaQuery(
+      data: const MediaQueryData(size: Size(400, 900)),
+      child: Scaffold(
+        body: EpisodePlayer(
+          sources: sources,
+          onSourceChanged: onSourceChanged,
+          resolver: resolve == null
+              ? null
+              : (sourceId) {
+                  onResolved?.call(sourceId);
+                  return resolve(sourceId);
+                },
+        ),
       ),
     ),
   );
@@ -90,11 +130,27 @@ void main() {
     });
 
     test('la pastiglia della fonte unisce qualita\' e lingua', () {
-      expect(sourceFixture(quality: '1080p', language: 'ita').label, '1080p SUB');
+      expect(sourceFixture(quality: '1080p', language: 'ita').label, '1080p ITA');
       expect(sourceFixture(quality: '720p', language: 'dub').label, '720p DUB');
       // Manca una delle due: resta solo l'altra, senza separatore appeso.
       expect(sourceFixture(quality: '1080p', language: null).label, '1080p');
-      expect(sourceFixture(quality: null, language: 'ita').label, 'SUB');
+      expect(sourceFixture(quality: null, language: 'ita').label, 'ITA');
+    });
+
+    test('l italiano non si confonde con il sottotitolato', () {
+      // Le due cose erano una sola etichetta: `ita` (audio gia' italiano) e
+      // `sub` (audio originale con sottotitoli) finivano entrambe in `SUB`.
+      // Un utente italiano leggeva "720p SUB" su una traccia doppiata e la
+      // sceglieva aspettandosi i sottotitoli.
+      expect(sourceFixture(quality: '720p', language: 'ita').label, '720p ITA');
+      expect(sourceFixture(quality: '720p', language: 'sub').label, '720p SUB');
+
+      // E con lo stesso valore non ci puo' essere ambiguit': due sorgenti
+      // diverse hanno sempre due etichette diverse, altrimenti nella riga dei
+      // codici non si sa quale scegliere.
+      final doppiato = sourceFixture(quality: '720p', language: 'ita').label;
+      final sottotitolato = sourceFixture(quality: '720p', language: 'sub').label;
+      expect(doppiato, isNot(sottotitolato));
     });
 
     test('un iframe non e\' riproducibile dall\'app', () {
@@ -103,6 +159,253 @@ void main() {
         sourceFixture(type: EpisodeSourceType.iframe).isPlayable,
         isFalse,
       );
+    });
+  });
+
+  group('fonti canoniche e risoluzione', () {
+    test('una fonte canonica ha bisogno del resolver', () {
+      // Il caso normale di un provider vero: l'indirizzo che arriva dal
+      // catalogo e' la pagina, non il file, e non si puo' aprire cosi'.
+      final canonica = sourceFixture(
+        url: null,
+        canonicalUrl: 'https://api.example.com/watch/1',
+        providerSlug: 'mock',
+        providerLabel: 'Provider di prova',
+      );
+
+      expect(canonica.needsResolution, isTrue);
+
+      // La scheda esterna apre il canonico quando non c'e' un altro indirizzo:
+      // su una fonte `iframe` i due non coincidono.
+      expect(canonica.playbackAddress, 'https://api.example.com/watch/1');
+    });
+
+    test('una fonte diretta non ha bisogno del resolver', () {
+      expect(sourceFixture().needsResolution, isFalse);
+    });
+
+    testWidgets('il resolver non viene chiamato su una fonte gia\' pronta',
+        (tester) async {
+      final repository = FakeEpisodesRepository();
+      final player = _playerHost(
+        sources: [sourceFixture()],
+        resolve: repository.resolveSource,
+      );
+
+      await tester.pumpWidget(player);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Una fonte con `source_url` non tocca la rete: risolverla costerebbe una
+      // richiesta per niente, e su un provider vero costerebbe un token.
+      expect(repository.resolutionCalls, 0);
+    });
+
+    testWidgets('una fonte canonica viene risolta prima di aprirsi', (tester) async {
+      final repository = FakeEpisodesRepository();
+      repository.resolvedById['src-canonica'] = resolvedFor(
+        'src-canonica',
+        url: 'https://cdn.example/ep1.mp4?token=risolto',
+      );
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-canonica',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+              providerSlug: 'mock',
+            ),
+          ],
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(repository.resolutionCalls, 1);
+    });
+
+    testWidgets('senza resolver una fonte canonica non si apre e si prova la dopo', (tester) async {
+      final repository = FakeEpisodesRepository();
+
+      final risolte = <String>[];
+      final indici = <int>[];
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-canonica',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+            sourceFixture(id: 'src-diretta', url: 'https://cdn.example/2.mp4'),
+          ],
+          // `resolve: null` e' il caso di una schermata senza backend sotto.
+          resolve: null,
+          onResolved: risolte.add,
+          onSourceChanged: indici.add,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Nessuna risoluzione e' avvenuta: senza resolver non c'e' modo di
+      // trasformare la canonica in un link.
+      expect(repository.resolutionCalls, 0);
+      expect(risolte, isEmpty);
+
+      // E il player non e' rimasto fermo sulla canonica: e' passato alla fonte
+      // successiva, che e' quello che dice il nome del test. Qui ci si ferma al
+      // salto e non all'apertura perche' nel test il player vero non parte —
+      // `media_kit` carica librerie native che qui non ci sono — e la fonte
+      // diretta finisce comunque sulla scheda di errore.
+      expect(indici, contains(1));
+    });
+
+    testWidgets('la risoluzione va in timeout invece di bloccare il player',
+        (tester) async {
+      // Un resolver che non risponde non puo' tenere lo scheletro acceso: dopo
+      // il timeout il player passa alla fonte successiva.
+      final aperte = <String>[];
+      final indici = <int>[];
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-lenta',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+            sourceFixture(id: 'src-diretta', url: 'https://cdn.example/2.mp4'),
+          ],
+          resolve: (sourceId) async {
+            aperte.add(sourceId);
+            await Future<void>.delayed(const Duration(seconds: 30));
+            return resolvedFor(sourceId);
+          },
+          onSourceChanged: indici.add,
+        ),
+      );
+
+      // Il resolver viene chiamato subito, ma si impianta per trenta secondi.
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(aperte, contains('src-lenta'));
+
+      // Dopo [EpisodePlayer.resolveTimeout] il player non aspetta oltre: molla
+      // la fonte lenta e passa alla successiva. Si avanza oltre anche i trenta
+      // secondi del resolver finto, altrimenti il suo timer resterebbe vivo a
+      // fine test e `flutter_test` lo segnalerebbe come pendente.
+      await tester.pump(EpisodePlayer.resolveTimeout);
+      await tester.pump(const Duration(seconds: 6));
+
+      expect(indici, contains(1));
+      expect(aperte, contains('src-lenta'));
+    });
+
+    testWidgets('un link gia\' scaduto viene rifatto invece di aperto', (tester) async {
+      final repository = FakeEpisodesRepository();
+      repository.resolvedById['src-scaduta'] = expiredFor('src-scaduta');
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-scaduta',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+            sourceFixture(id: 'src-diretta', url: 'https://cdn.example/2.mp4'),
+          ],
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // Il resolver e' stato chiamato piu' di una volta: la prima ha prodotto un
+      // link scaduto e il player ha chiesto un link nuovo invece di provare ad
+      // aprire quello vecchio.
+      expect(repository.resolutionCalls, greaterThan(1));
+    });
+
+    testWidgets('un resolver che fallisce porta alla fonte successiva', (tester) async {
+      final repository = FakeEpisodesRepository(
+        failResolutionWith: const SourceResolutionFailure('non risolvibile'),
+      );
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-rotta',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+            sourceFixture(id: 'src-diretta', url: 'https://cdn.example/2.mp4'),
+          ],
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // Il fallback automatico e' il comportamento normale: una fonte che non
+      // si risolve non deve fermare la riproduzione di un episodio che ha altre
+      // fonti buone.
+      expect(repository.resolutionCalls, greaterThanOrEqualTo(1));
+    });
+
+    testWidgets('l\'errore del resolver non finisce a schermo', (tester) async {
+      final repository = FakeEpisodesRepository(
+        failResolutionWith: const SourceResolutionFailure('segreto del provider'),
+      );
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-rotta',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+          ],
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+
+      // Il player prova la fonte tre volte e poi dice che le fonti non si
+      // risolvono. Il messaggio del provider non compare: quello che e' andato
+      // storto dentro al backend non e' roba da mostrare all'utente.
+      expect(find.textContaining('segreto del provider'), findsNothing);
+    });
+
+    testWidgets('la risoluzione non viene riusata fra aperture diverse', (tester) async {
+      final repository = FakeEpisodesRepository();
+
+      Future<void> apri() async {
+        await tester.pumpWidget(
+          _playerHost(
+            sources: [
+              sourceFixture(
+                id: 'src-canonica',
+                url: null,
+                canonicalUrl: 'https://api.example.com/watch/1',
+              ),
+            ],
+            resolve: repository.resolveSource,
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+
+      await apri();
+      await apri();
+
+      // Due aperture, due richieste: il token del primo tentativo scade e il
+      // secondo deve portarne uno nuovo. riusare il link precedente
+      // produrrebbe un player che si chiude da solo dopo qualche minuto, senza
+      // che nessuno capisca perche'.
+      expect(repository.resolutionCalls, 2);
     });
   });
 
@@ -409,8 +712,39 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('1080p SUB'), findsOneWidget);
+      expect(find.text('1080p ITA'), findsOneWidget);
       expect(find.text('720p ENG'), findsOneWidget);
+    });
+
+    testWidgets('due fonti identiche non diventano due pastiglie uguali',
+        (tester) async {
+      await tester.pumpWidget(
+        _host(
+          FakeEpisodesRepository(
+            episodes: [episodeFixture()],
+            sourcesByEpisode: {
+              'ep-1': [
+                sourceFixture(id: 's1', quality: '1080p', language: 'sub'),
+                // Stessa qualita' e stessa lingua della prima: provider
+                // diverso, quindi due scelte legittime. Ma senza un dato che le
+                // distingue l'utente legge due pastiglie identiche e non sa
+                // quale provare.
+                sourceFixture(id: 's2', quality: '1080p', language: 'sub'),
+              ],
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final etichette = tester
+          .widgetList<ArChip>(find.byType(ArChip))
+          .map((c) => c.label)
+          .toList();
+
+      expect(etichette.length, 2);
+      expect(etichette.toSet().length, 2,
+          reason: 'due scelte diverse devono avere due nomi diversi');
     });
   });
 

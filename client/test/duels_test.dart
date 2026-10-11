@@ -52,6 +52,24 @@ void main() {
       expect(pair.isPlayable, isFalse);
     });
 
+    test('i titoli italiani hanno la precedenza su quelli del catalogo', () {
+      final pair = DuelPair.parse({
+        'anime_a_id': 'a1',
+        'anime_b_id': 'a2',
+        'title_a': 'Shingeki no Kyojin',
+        'title_it_a': "L'attacco dei giganti",
+        'title_b': 'Trigun',
+        'title_it_b': null,
+      });
+
+      expect(pair.displayTitleA, "L'attacco dei giganti");
+      expect(pair.displayTitleB, 'Trigun');
+      // `titleOf` e' usato per il risultato mostrato dopo la scelta: deve
+      // restituire il titolo visibile, non quello del catalogo.
+      expect(pair.titleOf('a1'), "L'attacco dei giganti");
+      expect(pair.titleOf('a2'), 'Trigun');
+    });
+
     test('la scelta deve essere uno dei due contendenti', () {
       final pair = buildDuelPair();
 
@@ -107,6 +125,20 @@ void main() {
       expect(buildDuelStanding(elo: 1000).eloDelta, 0);
       expect(buildDuelStanding(elo: 1032).eloDelta, 32);
       expect(buildDuelStanding(elo: 968).eloDelta, -32);
+    });
+
+    test('displayTitle preferisce title_it', () {
+      final withIt = DuelStanding.parse({
+        'anime_id': 'a1',
+        'title': 'Shingeki no Kyojin',
+        'title_it': "L'attacco dei giganti",
+        'elo': 1000,
+        'duel_count': 1,
+      }, position: 1);
+      expect(withIt.displayTitle, "L'attacco dei giganti");
+
+      final noIt = DuelStanding.parse({'anime_id': 'a1', 'title': 'Trigun'}, position: 2);
+      expect(noIt.displayTitle, 'Trigun');
     });
   });
 

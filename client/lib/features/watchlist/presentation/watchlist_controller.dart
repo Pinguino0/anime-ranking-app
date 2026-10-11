@@ -60,6 +60,56 @@ final watchlistTotalsProvider =
   retry: appRetry,
 );
 
+/// Consigli di visione registrati nel gruppo.
+///
+/// Provider a parte dalla watchlist: i consigli sono un fatto distinto dalle
+/// righe (dicono chi ha consigliato cosa a chi) e una richiesta separata rende
+/// la schermata di gruppo utilizzabile anche se i consigli non rispondono.
+class GroupRecommendationsController extends AsyncNotifier<List<AnimeRecommendation>> {
+  GroupRecommendationsController(this.groupId);
+
+  final String groupId;
+
+  @override
+  Future<List<AnimeRecommendation>> build() =>
+      ref.watch(watchlistRepositoryProvider).recommendations(groupId);
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final groupRecommendationsProvider = AsyncNotifierProvider.family<
+    GroupRecommendationsController, List<AnimeRecommendation>, String>(
+  GroupRecommendationsController.new,
+  retry: appRetry,
+);
+
+/// La watchlist personale dell'utente.
+///
+/// Non e' una family: la lista personale non dipende da un gruppo e non ha
+/// nulla a che vedere con le liste condivise. I totali non hanno un provider
+/// dedicato perche' si ricavano dalle stesse righe (conteggi e somma degli
+/// episodi): una seconda richiesta per numeri che sono gia' qui sarebbe
+/// un'altra cosa da far combaciare.
+class MyListController extends AsyncNotifier<List<WatchlistEntry>> {
+  @override
+  Future<List<WatchlistEntry>> build() =>
+      ref.watch(watchlistRepositoryProvider).personalEntries();
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final myListProvider =
+    AsyncNotifierProvider<MyListController, List<WatchlistEntry>>(
+  MyListController.new,
+  retry: appRetry,
+);
+
 /// Modifiche alla watchlist.
 ///
 /// Un controller solo per le scritture, con stato di caricamento: le voci
@@ -77,10 +127,42 @@ class WatchlistActionController extends AsyncNotifier<void> {
   /// valore che non e' quello salvato.
   bool get isSaving => state.isLoading;
 
-  Future<void> setStatus({
+  /// Registra un consiglio di visione nel gruppo.
+  ///
+  /// Non passa da [_run] perche' oltre a righe e totali va invalidata anche la
+  /// lista dei consigli: saltarla lascerebbe a schermo il consiglio appena
+  /// inviato solo dopo un refresh manuale.
+  Future<void> recommend({
     required String groupId,
     required String animeId,
+    String? toUserId,
+    String? message,
+  }) async {
+    state = const AsyncLoading();
+
+    try {
+      await ref.read(watchlistRepositoryProvider).recommend(
+            groupId: groupId,
+            animeId: animeId,
+            toUserId: toUserId,
+            message: message,
+          );
+      state = const AsyncData(null);
+    } catch (error, stackTrace) {
+      state = AsyncError(error, stackTrace);
+      rethrow;
+    }
+
+    ref.invalidate(watchlistProvider(groupId));
+    ref.invalidate(watchlistTotalsProvider(groupId));
+    ref.invalidate(groupRecommendationsProvider(groupId));
+    ref.invalidate(myListProvider);
+  }
+
+  Future<void> setStatus({
+    required String animeId,
     required WatchStatus status,
+    String? groupId,
   }) =>
       _run(
         groupId,
@@ -90,9 +172,9 @@ class WatchlistActionController extends AsyncNotifier<void> {
       );
 
   Future<void> setEpisode({
-    required String groupId,
     required String animeId,
     required int episode,
+    String? groupId,
   }) =>
       _run(
         groupId,
@@ -101,9 +183,9 @@ class WatchlistActionController extends AsyncNotifier<void> {
       );
 
   Future<void> setFavorite({
-    required String groupId,
     required String animeId,
     required bool isFavorite,
+    String? groupId,
   }) =>
       _run(
         groupId,
@@ -113,8 +195,8 @@ class WatchlistActionController extends AsyncNotifier<void> {
       );
 
   Future<void> remove({
-    required String groupId,
     required String animeId,
+    String? groupId,
   }) =>
       _run(
         groupId,
@@ -122,7 +204,7 @@ class WatchlistActionController extends AsyncNotifier<void> {
       );
 
   /// Esegue la scrittura, ne riletta la lista e rilancia l errore.
-  Future<void> _run(String groupId, Future<void> Function() action) async {
+  Future<void> _run(String? groupId, Future<void> Function() action) async {
     state = const AsyncLoading();
     try {
       await action();
@@ -139,8 +221,15 @@ class WatchlistActionController extends AsyncNotifier<void> {
     // preferito in piu', una voce in piu') quindi vanno riletti insieme alle
     // righe: cifre e elenco che non tornano insieme sono peggio di un secondo
     // di caricamento.
-    ref.invalidate(watchlistProvider(groupId));
-    ref.invalidate(watchlistTotalsProvider(groupId));
+    // Solo la watchlist di gruppo ha cifre separate da rileggere: quella
+    // personale si conta dalle righe, che vengono ricaricate qui sotto.
+    if (groupId != null) {
+      ref.invalidate(watchlistProvider(groupId));
+      ref.invalidate(watchlistTotalsProvider(groupId));
+    }
+    // "La mia lista" e' la watchlist personale: una scrittura senza gruppo la
+    // tocca direttamente, una di gruppo no.
+    ref.invalidate(myListProvider);
   }
 }
 

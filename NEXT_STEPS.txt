@@ -1,0 +1,7 @@
+﻿APPLY AFTER READING:
+
+1) Aggiorna tunnel secret se necessario
+2) Testa EF con source_id AW reale (Re:Zero S3 ep1)
+3) Controlla ordine fonti (AU -x vs AW) in resolve-source
+4) Pulisci placeholder
+5) Migliora error reporting (structured)

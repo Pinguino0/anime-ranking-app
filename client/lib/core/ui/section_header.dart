@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../theme/section_accent.dart';
 
 /// Intestazione di una sezione di contenuto.
 ///
@@ -38,21 +39,25 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Il filetto prende la tinta della sezione corrente: entrando nella
+    // classifica le intestazioni diventano oro, nei gruppi teal. Fuori da una
+    // shell resta il gradiente del marchio, che e' quello di prima.
+    final accent = SectionAccentScope.of(context);
 
     return Padding(
       padding: padding ?? EdgeInsets.symmetric(horizontal: ArSpace.page(context).left),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Filetto: due pixel di viola che staccano l'intestazione dal
-          // contenuto che segue. Alto quanto il titolo e non di piu': se
-          // arrivasse al fondo del blocco sembrerebbe un bordo della card.
+          // Filetto: due pixel che staccano l'intestazione dal contenuto che
+          // segue. Alto quanto il titolo e non di piu': se arrivasse al fondo
+          // del blocco sembrerebbe un bordo della card.
           Container(
             width: 3,
             height: 20,
             margin: const EdgeInsets.only(right: ArSpace.sm),
             decoration: BoxDecoration(
-              gradient: ArColors.brand,
+              gradient: accent.gradient,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -140,7 +145,7 @@ class MetricLabel extends StatelessWidget {
 /// Non il `FilterChip` di Material perche' quello ha due problemi in questa
 /// app: il bordo sparisce in quello stato e il raggio e' piccolo rispetto al
 /// resto del sistema. Qui il testo selezionato resta leggibile sopra il
-/// riempimento viola e il raggio segue [ArRadii.chip] come tutto il resto.
+/// riempimento colorato e il raggio segue [ArRadii.chip] come tutto il resto.
 class ArChip extends StatelessWidget {
   const ArChip({
     super.key,
@@ -166,6 +171,11 @@ class ArChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // La selezione prende la tinta della sezione corrente: nella watchlist i
+    // filtri si accendono di blu, nella classifica di oro. Fuori da una shell
+    // resta il viola del marchio, che e' quello di prima.
+    final tint = SectionAccentScope.of(context).base;
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -175,11 +185,11 @@ class ArChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           color: selected
-              ? ArColors.primary.withValues(alpha: 0.18)
+              ? tint.withValues(alpha: 0.18)
               : ArColors.containerLow,
           borderRadius: BorderRadius.circular(ArRadii.chip),
           border: Border.all(
-            color: selected ? ArColors.primary : ArColors.borderSoft,
+            color: selected ? tint : ArColors.borderSoft,
           ),
         ),
         child: Row(
@@ -190,7 +200,7 @@ class ArChip extends StatelessWidget {
                 icon,
                 size: 15,
                 color: iconColor ??
-                    (selected ? ArColors.primary : ArColors.textLow),
+                    (selected ? tint : ArColors.textLow),
               ),
               const SizedBox(width: 6),
             ],

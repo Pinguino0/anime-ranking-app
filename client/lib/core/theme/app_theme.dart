@@ -106,6 +106,19 @@ class ArColors {
     stops: [0, 0.55, 1],
   );
 
+  /// Variante orizzontale dello scrim del banner, per il layout desktop.
+  ///
+  /// Li' il testo sta in una colonna a sinistra e l'immagine resta visibile a
+  /// destra, quindi il gradiente scorre da sinistra verso destra invece che
+  /// dall'alto in basso. Gli stessi neri di [heroScrim] (lo sfondo [bg] con
+  /// alfa decrescente), cosi' i due scrim restano la stessa ombra su due assi.
+  static const LinearGradient heroScrimSide = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [Color(0xF205050A), Color(0xB305050A), Color(0x0005050A)],
+    stops: [0, 0.5, 0.85],
+  );
+
   /// Variante piu' fredda per sfondi grandi, meno aggressiva del brand.
   ///
   /// Diagonale come il brand, ma con poco viola: su una superficie grande il

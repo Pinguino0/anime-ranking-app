@@ -26,7 +26,10 @@ class ContentRow extends StatefulWidget {
     this.onSeeAll,
     this.itemWidth,
     this.height,
-    this.padding = const EdgeInsets.symmetric(vertical: ArSpace.lg),
+    // 16 e non 24: fra una riga e l'altra il padding e' sommato, quindi 24 sopra
+    // e 24 sotto davano 48px di vuoto nel punto esatto in cui l'occhio
+    // attraversa le sezioni.
+    this.padding = const EdgeInsets.symmetric(vertical: ArSpace.md),
   });
 
   final String title;
@@ -107,9 +110,13 @@ class _ContentRowState extends State<ContentRow> {
   Widget build(BuildContext context) {
     final horizontal = ArSpace.page(context).left;
     final width = widget.itemWidth ?? _widthFor(context, horizontal);
-    // La card e' in 2:3 con sotto il titolo: si aggiunge lo spazio del blocco
-    // testo. Senza, l'ultima card verrebbe tagliata dal bordo inferiore.
-    final height = widget.height ?? width * 3 / 2 + 52;
+    // La card e' alta esattamente 2:3: il titolo sta SOPRA la locandina, non
+    // sotto, quindi l'altezza e' quella della locandina e basta. Qui un tempo
+    // c'erano 52px in piu' per il blocco testo di sotto e, dopo aver messo il
+    // titolo sull'immagine, nessuno li ha tolti: ogni locandina si portava
+    // dietro mezzo palmo di spazio morto e la riga sembrava piu' aria del
+    // dovesse.
+    final height = widget.height ?? width * 3 / 2;
 
     return Padding(
       padding: widget.padding,
@@ -218,7 +225,7 @@ class _Arrow extends StatelessWidget {
       start: left ? 2 : null,
       end: left ? null : 2,
       top: 0,
-      bottom: 52,
+      bottom: 0,
       child: Center(
         child: ArPressable(
           onTap: onTap,
@@ -456,10 +463,12 @@ class PosterGridSkeleton extends StatelessWidget {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: ArSpace.md),
+      padding: EdgeInsets.symmetric(horizontal: ArSpace.page(context).left),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns,
-        mainAxisExtent: itemWidth * 3 / 2 + 52,
+        // Stessa altezza della card vera: se lo scheletro e' piu' alto, durante il
+// caricamento la griglia cresce di un colpo appena i dati arrivano.
+        mainAxisExtent: itemWidth * 3 / 2,
         crossAxisSpacing: ArSpace.sm,
         mainAxisSpacing: ArSpace.sm,
       ),

@@ -179,6 +179,28 @@ class FakeAnimeRepository implements AnimeRepository {
     return edgeResult;
   }
 
+  int relatedCalls = 0;
+
+  /// Relazioni restituite dalla RPC finta.
+  List<RelatedAnime> relatedResult = const [];
+
+  @override
+  Future<List<RelatedAnime>> related(String animeId) async {
+    relatedCalls++;
+    return relatedResult;
+  }
+
+  int watchOrderCalls = 0;
+
+  /// Ordine di visione restituito dalla RPC finta.
+  List<WatchOrderItem> watchOrderResult = const [];
+
+  @override
+  Future<List<WatchOrderItem>> watchOrder(String animeId) async {
+    watchOrderCalls++;
+    return watchOrderResult;
+  }
+
   /// Riferimento temporale per "uscito di recente".
   ///
   /// Fisso e non `DateTime.now()`: i test devono dare lo stesso risultato

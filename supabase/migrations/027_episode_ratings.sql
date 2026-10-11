@@ -68,7 +68,7 @@ create policy "episode_ratings: service write"
   with check (true);
 
 -- Gli indici e le sequence sono leaking di informazione minimo, ma la 024 ha
--- gia' stabilito il criterio: ci�� che il client non tocca direttamente non
+-- gia' stabilito il criterio: cio' che il client non tocca direttamente non
 -- mantiene privilegi di tabella.
 revoke all on public.episode_ratings from anon, authenticated;
 

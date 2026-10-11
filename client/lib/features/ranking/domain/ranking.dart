@@ -16,6 +16,7 @@ class RankingEntry {
     required this.position,
     required this.animeId,
     required this.title,
+    this.italianTitle,
     this.japaneseTitle,
     this.imageUrl,
     this.episodes,
@@ -31,6 +32,9 @@ class RankingEntry {
   final int position;
   final String animeId;
   final String title;
+
+  /// Titolo italiano, se il catalogo lo conosce. La UI usa [displayTitle].
+  final String? italianTitle;
   final String? japaneseTitle;
   final String? imageUrl;
   final int? episodes;
@@ -64,6 +68,10 @@ class RankingEntry {
   bool get movedUp => positionDelta > 0;
   bool get movedDown => positionDelta < 0;
 
+  /// Titolo mostrato all'utente: italiano se disponibile, altrimenti il titolo
+  /// del catalogo. Un solo punto di scelta, come in [AnimeEntry].
+  String get displayTitle => italianTitle ?? title;
+
   /// Testo del voto, senza forzare i decimali inutili.
   ///
   /// La colonna e' numeric: 8.00 e 8 sono lo stesso numero, e mostrare "8.00"
@@ -89,6 +97,7 @@ class RankingEntry {
         position: _toInt(json['rank_position']) ?? 0,
         animeId: '${json['anime_id']}',
         title: json['title'] as String? ?? 'Senza titolo',
+        italianTitle: json['title_it'] as String?,
         japaneseTitle: json['japanese_title'] as String?,
         imageUrl: json['image_url'] as String?,
         episodes: _toInt(json['episodes']),
@@ -142,6 +151,7 @@ class SpecialRankingEntry {
     required this.position,
     required this.animeId,
     required this.title,
+    this.italianTitle,
     this.imageUrl,
     required this.value,
     required this.secondary,
@@ -151,7 +161,14 @@ class SpecialRankingEntry {
   final int position;
   final String animeId;
   final String title;
+
+  /// Titolo italiano, se il catalogo lo conosce. La UI usa [displayTitle].
+  final String? italianTitle;
   final String? imageUrl;
+
+  /// Titolo mostrato all'utente: italiano se disponibile, altrimenti il titolo
+  /// del catalogo.
+  String get displayTitle => italianTitle ?? title;
 
   /// Metrica principale, quella su cui e' ordinata la classifica.
   final double value;
@@ -165,6 +182,7 @@ class SpecialRankingEntry {
         position: _toInt(json['rank_position']) ?? 0,
         animeId: '${json['anime_id']}',
         title: json['title'] as String? ?? 'Senza titolo',
+        italianTitle: json['title_it'] as String?,
         imageUrl: json['image_url'] as String?,
         value: _toDouble(json['value']) ?? 0,
         secondary: _toDouble(json['secondary']) ?? 0,
@@ -270,6 +288,7 @@ class GroupStats {
     return StatsHighlight(
       animeId: '${raw['anime_id']}',
       title: raw['title'] as String? ?? 'Senza titolo',
+      italianTitle: raw['title_it'] as String?,
       imageUrl: raw['image_url'] as String?,
       value: _toDouble(raw['mean'] ?? raw['votes'] ?? raw['spread']),
     );
@@ -281,13 +300,21 @@ class StatsHighlight {
   const StatsHighlight({
     required this.animeId,
     required this.title,
+    this.italianTitle,
     this.imageUrl,
     this.value,
   });
 
   final String animeId;
   final String title;
+
+  /// Titolo italiano, se il catalogo lo conosce. La UI usa [displayTitle].
+  final String? italianTitle;
   final String? imageUrl;
+
+  /// Titolo mostrato all'utente: italiano se disponibile, altrimenti il titolo
+  /// del catalogo.
+  String get displayTitle => italianTitle ?? title;
 
   /// La metrica che caratterizza questa voce: media, voti o distanza, a seconda
   /// della sezione. Il backend manda una chiave diversa in ogni caso e qui si

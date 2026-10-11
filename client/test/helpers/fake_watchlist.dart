@@ -15,6 +15,7 @@ class FakeWatchlistRepository implements WatchlistRepository {
   final Map<String, WatchlistEntry> _entries;
 
   int entriesCalls = 0;
+  int personalEntriesCalls = 0;
   int totalsCalls = 0;
 
   /// Anime rimossi, nell'ordine delle chiamate.
@@ -39,6 +40,17 @@ class FakeWatchlistRepository implements WatchlistRepository {
 
   WatchlistTotals totalsResult = const WatchlistTotals();
 
+  /// Consigli restituiti da [recommendations], per gruppo.
+  List<AnimeRecommendation> recommendationsResult = [];
+
+  /// Consigli inviati con [recommend], come "animeId|toUserId|messaggio".
+  List<String> sentRecommendations = [];
+
+  int recommendationsCalls = 0;
+
+  @override
+  String get currentUserId => 'me';
+
   @override
   Future<List<WatchlistEntry>> entries(String groupId) async {
     entriesCalls++;
@@ -47,6 +59,16 @@ class FakeWatchlistRepository implements WatchlistRepository {
     if (failure != null) throw failure;
 
     return List.unmodifiable(_entries.values.where((e) => e.groupId == groupId));
+  }
+
+  @override
+  Future<List<WatchlistEntry>> personalEntries() async {
+    personalEntriesCalls++;
+
+    final failure = totalsFailure;
+    if (failure != null) throw failure;
+
+    return _entries.values.where((e) => e.groupId == null).toList();
   }
 
   @override
@@ -60,7 +82,7 @@ class FakeWatchlistRepository implements WatchlistRepository {
   }
 
   @override
-  Future<void> setStatus(String groupId, String animeId, WatchStatus status) async {
+  Future<void> setStatus(String? groupId, String animeId, WatchStatus status) async {
     _fail('status');
     statusChanges.add('$animeId|${status.wire}');
 
@@ -71,12 +93,14 @@ class FakeWatchlistRepository implements WatchlistRepository {
             groupId: groupId,
             animeId: animeId,
             status: status,
+            userId: 'me',
+            isMine: true,
           )
         : existing.copyWith(status: status);
   }
 
   @override
-  Future<void> setEpisode(String groupId, String animeId, int episode) async {
+  Future<void> setEpisode(String? groupId, String animeId, int episode) async {
     _fail('episode');
 
     final existing = _entries[animeId];
@@ -90,7 +114,7 @@ class FakeWatchlistRepository implements WatchlistRepository {
   }
 
   @override
-  Future<void> setFavorite(String groupId, String animeId, bool isFavorite) async {
+  Future<void> setFavorite(String? groupId, String animeId, bool isFavorite) async {
     _fail('favorite');
     favoriteChanges.add('$animeId|$isFavorite');
 
@@ -101,10 +125,33 @@ class FakeWatchlistRepository implements WatchlistRepository {
   }
 
   @override
-  Future<void> remove(String groupId, String animeId) async {
+  Future<void> remove(String? groupId, String animeId) async {
     _fail('remove');
     removed.add(animeId);
     _entries.remove(animeId);
+  }
+
+  @override
+  Future<List<AnimeRecommendation>> recommendations(String groupId) async {
+    recommendationsCalls++;
+
+    final failure = entriesFailure;
+    if (failure != null) throw failure;
+
+    return List.unmodifiable(
+      recommendationsResult.where((r) => r.groupId == groupId),
+    );
+  }
+
+  @override
+  Future<void> recommend({
+    required String groupId,
+    required String animeId,
+    String? toUserId,
+    String? message,
+  }) async {
+    _fail('recommend');
+    sentRecommendations.add('$animeId|${toUserId ?? '*'}|${message ?? ''}');
   }
 
   void _fail(String operation) {
@@ -123,6 +170,9 @@ WatchlistEntry buildWatchlistEntry({
   String title = 'Cowboy Bebop',
   int? episodes = 12,
   bool airing = false,
+  String userId = 'me',
+  String? userName,
+  String? message,
 }) =>
     WatchlistEntry(
       id: 'w-$animeId',
@@ -131,6 +181,10 @@ WatchlistEntry buildWatchlistEntry({
       status: status,
       currentEpisode: currentEpisode,
       isFavorite: isFavorite,
+      userId: userId,
+      userName: userName ?? (userId == 'me' ? 'Io' : userId),
+      message: message,
+      isMine: userId == 'me',
       title: title,
       episodes: episodes,
       year: 1998,

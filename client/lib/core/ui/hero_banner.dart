@@ -77,18 +77,7 @@ class HeroBanner extends StatelessWidget {
                 // testo prende la colonna sinistra. Il gradiente e' orizzontale
                 // perche' il confine fra le due zone e' verticale.
                 const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        Color(0xF205050A),
-                        Color(0xB305050A),
-                        Color(0x0005050A),
-                      ],
-                      stops: [0, 0.5, 0.85],
-                    ),
-                  ),
+                  decoration: BoxDecoration(gradient: ArColors.heroScrimSide),
                 ),
 
               Align(

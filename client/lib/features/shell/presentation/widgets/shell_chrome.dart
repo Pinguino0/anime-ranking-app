@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/transitions.dart';
 
 /// Una voce di navigazione.
@@ -13,11 +14,20 @@ class ArDestination {
     required this.label,
     required this.icon,
     required this.selectedIcon,
+    this.accent = ArAccent.home,
   });
 
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+
+  /// Accento della sezione.
+  ///
+  /// La voce attiva si colora con questo: la pastiglia della barra e il filetto
+  /// della colonna laterale smettono di essere sempre viola e prendono la tinta
+  /// della sezione che aprono. E' il modo in cui il colore dice "sei qui" prima
+  /// ancora che si legga l'etichetta.
+  final ArAccent accent;
 }
 
 /// Il nome dell'app.
@@ -152,13 +162,11 @@ class _BarItem extends StatelessWidget {
             curve: ArMotion.enter,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
-              gradient: selected ? ArColors.brand : null,
+              gradient: selected ? destination.accent.gradient : null,
               borderRadius: BorderRadius.circular(ArRadii.chip),
               // L'alone segue la pastiglia e sparisce con lei: senza, la voce
               // non selezionata avrebbe un alone che non spiega nulla.
-              boxShadow: selected
-                  ? ArShadows.glow(ArColors.primary, strength: 0.28)
-                  : null,
+              boxShadow: selected ? destination.accent.glow() : null,
             ),
             child: Icon(
               selected ? destination.selectedIcon : destination.icon,
@@ -275,9 +283,7 @@ class _RailItem extends StatelessWidget {
           height: 46,
           padding: const EdgeInsets.only(left: ArSpace.sm, right: ArSpace.sm),
           decoration: BoxDecoration(
-            color: selected
-                ? ArColors.primary.withValues(alpha: 0.14)
-                : Colors.transparent,
+            color: selected ? destination.accent.soft : Colors.transparent,
             borderRadius: BorderRadius.circular(ArRadii.control),
           ),
           child: Row(
@@ -292,7 +298,7 @@ class _RailItem extends StatelessWidget {
                 width: 3,
                 height: 22,
                 decoration: BoxDecoration(
-                  color: selected ? ArColors.primary : Colors.transparent,
+                  color: selected ? destination.accent.base : Colors.transparent,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -300,7 +306,7 @@ class _RailItem extends StatelessWidget {
               Icon(
                 selected ? destination.selectedIcon : destination.icon,
                 size: 21,
-                color: selected ? ArColors.primary : ArColors.textMid,
+                color: selected ? destination.accent.base : ArColors.textMid,
               ),
               const SizedBox(width: ArSpace.sm),
               Expanded(

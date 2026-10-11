@@ -5,9 +5,9 @@
 ///  - il **catalogo locale** (`public.anime`), la cache che la Edge Function
 ///    riempie. Li' ogni anime ha un `id` interno e la UI puo' usarlo subito
 ///    per votarlo.
-///  - la **risposta di Jikan**, quando la ricerca arriva da fuori e l'opera
-///    non e' ancora in catalogo. In quel caso `id` e' `null`: non esiste un id
-///    su cui votare.
+///  - la **risposta del catalogo esterno**, quando la ricerca arriva da fuori e
+///    l'opera non e' ancora in catalogo. In quel caso `id` e' `null`: non esiste
+///    un id su cui votare.
 ///
 /// Per questo [AnimeEntry.id] e' nullable e [AnimeEntry.inCatalog] dice da
 /// dove viene il dato. Non e' una difformita: e' l'informazione che permette
@@ -18,8 +18,8 @@ library;
 /// Formato dell'opera.
 ///
 /// I valori corrispondono all'enum `public.anime_type` del database e alle
-/// etichette di MyAnimeList: cambiarli da una parte sola romperebbe o i
-/// filtri o la lettura.
+/// etichette dei cataloghi esterni (AniList, Kitsu): cambiarli da una parte
+/// sola romperebbe o i filtri o la lettura.
 enum AnimeMediaType {
   tv('TV', 'TV'),
   movie('Movie', 'Film'),
@@ -112,12 +112,13 @@ enum AnimeAirStatus {
   }
 }
 
-/// Un anime del catalogo, sia che arrivi dalla cache sia da Jikan.
+/// Un anime del catalogo, sia che arrivi dalla cache sia dal catalogo esterno.
 class AnimeEntry {
   const AnimeEntry({
     required this.externalId,
     required this.title,
     this.id,
+    this.italianTitle,
     this.japaneseTitle,
     this.synopsis,
     this.imageUrl,
@@ -139,18 +140,23 @@ class AnimeEntry {
     this.inCatalog = true,
   });
 
-  /// Id esterno MyAnimeList, sempre presente.
+  /// Id esterno del provider (AniList o Kitsu), sempre presente.
   ///
   /// Resta disponibile anche per le righe in catalogo, perche' e' la chiave
-  /// con cui la Edge Function riconosce un anime gia' visto. Usare l'id
-  /// interno al suo posto romperebbe il collegamento con Jikan.
+  /// con cui la Edge Function riconosce un anime gia' visto e non lo scrive
+  /// due volte. Usare l'id interno al suo posto romperebbe questo
+  /// riconoscimento: la funzione non conosce gli id di `public.anime`.
   final String externalId;
 
-  /// Id interno di `public.anime`. `null` se l'opera arriva da Jikan e non e'
-  /// ancora stata scritta in catalogo.
+  /// Id interno di `public.anime`. `null` se l'opera arriva dal catalogo
+  /// esterno e non e' ancora stata scritta in catalogo.
   final String? id;
 
   final String title;
+
+  /// Titolo in italiano, se esiste. `null` se il catalogo non lo conosce: la
+  /// UI mostra [displayTitle].
+  final String? italianTitle;
   final String? japaneseTitle;
   final String? synopsis;
   final String? imageUrl;
@@ -164,15 +170,15 @@ class AnimeEntry {
   final DateTime? airedFrom;
   final DateTime? airedTo;
 
-  /// Voto medio MyAnimeList (0-10). Non e' il voto dato dall'utente in un
-  /// gruppo: quello vive in `ratings`.
+  /// Voto medio del catalogo esterno, gia' in scala 0-10. Non e' il voto dato
+  /// dall'utente in un gruppo: quello vive in `ratings`.
   final double? score;
 
-  /// Quanti utenti hanno votato su MyAnimeList. Serve per dare il senso del
-  /// voto: 8,4 su 40 utenti e 8,4 su 800.000 non sono la stessa cosa.
+  /// Quanti utenti hanno votato nel catalogo esterno. Serve per dare il senso
+  /// del voto: 8,4 su 40 utenti e 8,4 su 800.000 non sono la stessa cosa.
   final int? scoredBy;
 
-  /// Membri che hanno l'opera in lista su MyAnimeList.
+  /// Quante persone hanno l'opera in lista nel catalogo esterno.
   final int? popularity;
 
   final String? duration;
@@ -244,9 +250,9 @@ class AnimeEntry {
   /// divergessero, la UI mostrerebbe gli stessi campi vuoti a seconda della
   /// provenienza.
   factory AnimeEntry.parse(Map<String, dynamic> row) {
-    // `id` e' assente nella risposta di Jikan e valore esplicito `null` in
-    // quella della cache: i due casi si distinguono perche' in entrambi il
-    // risultato e' "non votabile", ma `inCatalog` dice il perche'.
+    // `id` e' assente nella risposta del catalogo esterno e valore esplicito
+    // `null` in quella della cache: i due casi si distinguono perche' in
+    // entrambi il risultato e' "non votabile", ma `inCatalog` dice il perche'.
     final rawId = row['id'];
     final id = rawId is String && rawId.isNotEmpty ? rawId : null;
 
@@ -254,6 +260,7 @@ class AnimeEntry {
       externalId: _string(row['external_id']) ?? '',
       id: id,
       title: _string(row['title']) ?? 'Senza titolo',
+      italianTitle: _string(row['title_it']),
       japaneseTitle: _string(row['japanese_title']),
       synopsis: _string(row['synopsis']),
       imageUrl: _string(row['image_url']),
@@ -276,10 +283,19 @@ class AnimeEntry {
     );
   }
 
-  /// true se e' la stessa opera, per evitare duplicati quando una ricerca
+  /// true se questa e' la stessa opera, per evitare duplicati quando una ricerca
   /// incontra la stessa anime in due pagine.
   bool sameAs(AnimeEntry other) =>
       other.externalId.isNotEmpty && other.externalId == externalId;
+
+  /// Titolo mostrato all'utente: quello italiano quando c'e', altrimenti il
+  /// titolo del catalogo (romaji o inglese a seconda della riga).
+  ///
+  /// Un solo posto che decide come intitolare l'opera, perche' la UI deve
+  /// mostrare lo stesso nome ovunque (home, ricerca, scheda): se ognuno
+  /// scegliesse per conto proprio, l'utente vedrebbe l'anime chiamato in due
+  /// modi nella stessa schermata.
+  String get displayTitle => italianTitle ?? title;
 
   static String? _string(Object? value) {
     if (value is String) {
@@ -321,6 +337,91 @@ class AnimeEntry {
     }
     return const [];
   }
+}
+
+/// Un'opera correlata a un anime (sequel, prequel, ...).
+///
+/// La relazione arriva dalla RPC `anime_related`, che restituisce la stessa
+/// forma di una ricerca piu' il campo `relation_type`, quindi l'[entry] si
+/// costruisce con lo stesso parser del catalogo. Quando l'opera correlata non
+/// e' ancora in catalogo, `entry.inCatalog` e' false: la scheda si apre
+/// comunque, con il suo avviso.
+class RelatedAnime {
+  const RelatedAnime({required this.relationType, required this.entry});
+
+  /// Tipo di relazione AniList: `SEQUEL`, `PREQUEL`, `SIDE_STORY`, ...
+  final String relationType;
+
+  final AnimeEntry entry;
+
+  factory RelatedAnime.parse(Map<String, dynamic> row) => RelatedAnime(
+    relationType: _string(row['relation_type']) ?? 'OTHER',
+    entry: AnimeEntry.parse(row),
+  );
+
+  /// Etichetta italiana del tipo di relazione.
+  String get relationLabel => switch (relationType) {
+    'PREQUEL' => 'Prequel',
+    'SEQUEL' => 'Sequel',
+    'SIDE_STORY' => 'Storia collaterale',
+    'PARENT' => 'Storia principale',
+    'ALTERNATIVE' => 'Alternativa',
+    'SPIN_OFF' => 'Spin-off',
+    'SUMMARY' => 'Riepilogo',
+    _ => 'Correlato',
+  };
+
+  /// I tipi che vale la pena mostrare in scheda.
+  ///
+  /// Fuori restano `CHARACTER`, `OTHER`, `ADAPTATION` e i `SUMMARY`: sono
+  /// collegamenti poco affidabili (speciali, riassunti, schede di personaggi)
+  /// che riempirebbero la sezione senza dire all'utente cosa guardare dopo.
+  static const Set<String> meaningfulTypes = {
+    'PREQUEL',
+    'SEQUEL',
+    'SIDE_STORY',
+    'PARENT',
+    'ALTERNATIVE',
+    'SPIN_OFF',
+  };
+
+  bool get isMeaningful => meaningfulTypes.contains(relationType);
+
+  static String? _string(Object? value) {
+    if (value is String) {
+      final trimmed = value.trim();
+      return trimmed.isEmpty ? null : trimmed;
+    }
+    return null;
+  }
+}
+
+/// Una tappa dell'ordine di visione ("da dove iniziare").
+///
+/// La catena arriva gia' ordinata dalla RPC `anime_watch_order`: [position]
+/// parte da 1 e [isStart] marca la prima opera, quella da cui cominciare. La
+/// scheda mostra la sezione solo quando la catena ha piu' di un'opera: con una
+/// sola voce non c'e' nessun ordine da comunicare.
+class WatchOrderItem {
+  const WatchOrderItem({
+    required this.position,
+    required this.isStart,
+    required this.entry,
+  });
+
+  /// Posizione nella catena, da 1.
+  final int position;
+
+  /// true per la prima opera: e' il punto di partenza.
+  final bool isStart;
+
+  final AnimeEntry entry;
+
+  factory WatchOrderItem.parse(Map<String, dynamic> row) => WatchOrderItem(
+    position: AnimeEntry._int(row['position']) ?? 1,
+    isStart: row['is_start'] == true,
+    entry: AnimeEntry.parse(row),
+  );
 }
 
 /// Un genere disponibile con il numero di anime che lo hanno.

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../constants/breakpoints.dart';
 import '../theme/app_theme.dart';
+import '../theme/section_accent.dart';
 import 'transitions.dart';
 
 /// Card di un anime per griglie e caroselli.
@@ -99,6 +100,11 @@ class _AnimeCardState extends State<AnimeCard> {
         Breakpoints.fromContext(context) == LayoutSize.expanded;
 
     final active = canHover && _hovered;
+
+    // Il bordo dell'hover prende la tinta della sezione: nella classifica si
+    // accende d'oro, nella watchlist di blu. Fuori da una shell resta il viola
+    // del marchio, che e' quello di prima.
+    final tint = SectionAccentScope.of(context).base;
 
     final poster = AspectRatio(
       aspectRatio: 2 / 3,
@@ -222,10 +228,10 @@ class _AnimeCardState extends State<AnimeCard> {
         // nessun pixel quindi non muove le card vicine.
         border: Border.all(
           color: active
-              ? ArColors.primary.withValues(alpha: 0.7)
+              ? tint.withValues(alpha: 0.7)
               : ArColors.borderSoft,
         ),
-        boxShadow: active ? ArShadows.glow(ArColors.primary, strength: 0.22) : null,
+        boxShadow: active ? ArShadows.glow(tint, strength: 0.22) : null,
       ),
       child: poster,
     );

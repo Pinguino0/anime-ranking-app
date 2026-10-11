@@ -85,7 +85,9 @@ $clientRpcs = @(
   'rating_distribution', 'personal_stats', 'compare_users', 'compare_summary',
   'next_duel_pair', 'duel_elo', 'create_tournament',
   'delete_tournament', 'cast_tournament_vote', 'resolve_tournament_match',
-  'tournament_standings', 'delete_own_account'
+  'tournament_standings', 'delete_own_account',
+  # Blocco episodi (migrazioni 026 e 027).
+  'episodes_for_anime', 'episode_sources_list', 'episode_rate'
 )
 
 # Funzioni che il client NON deve poter chiamare. La lista serve al contrario

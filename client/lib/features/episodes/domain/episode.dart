@@ -44,20 +44,61 @@ enum EpisodeSourceType {
 ///
 /// Una fonte non e' "il video": e' un indirizzo, con una qualita' e una lingua.
 /// Lo stesso episodio puo' averne tre, e il player le prova in ordine.
+///
+/// Due tipi di indirizzo convivono qui e non sono interscambiabili:
+///
+///  - [url] e' gia' riproducibile. Vale per sempre e si puo' aprire subito.
+///  - [canonicalUrl] e' l'indirizzo del catalogo: la pagina, non il video. Non
+///    si apre, e vale finche' quel catalogo esiste.
+///
+/// Il player non prova mai [canonicalUrl]: chiede a `resolve-source` di
+/// trasformarlo in qualcosa di riproducibile e usa quello che torna.
 class EpisodeSource {
   const EpisodeSource({
     required this.id,
-    required this.url,
+    this.url,
+    this.canonicalUrl,
     required this.type,
     this.quality,
     this.language,
+    this.providerSlug,
+    this.providerLabel,
   });
 
   final String id;
-  final String url;
+
+  /// Indirizzo gia' riproducibile, quando la fonte e' di quelle che si aprono
+  /// senza passare dal resolver.
+  ///
+  /// `null` per una fonte canonica: non e' un errore, e' il caso normale di chi
+  /// ha un provider dietro.
+  final String? url;
+
+  /// L'indirizzo da risolvere, quando la fonte ha un provider.
+  final String? canonicalUrl;
+
   final EpisodeSourceType type;
   final String? quality;
   final String? language;
+
+  /// Chi sa risolvere [canonicalUrl].
+  final String? providerSlug;
+
+  /// Come si chiama [providerSlug] all'utente.
+  final String? providerLabel;
+
+  /// true se questa fonte ha bisogno del resolver prima di essere riprodotta.
+  bool get needsResolution => canonicalUrl != null;
+
+  /// true se la fonte e' l'audio originale con sottotitoli.
+  ///
+  /// Diverso da [isPlayable]: dice quale traccia audio porta la fonte, non se
+  /// l'app la sa riprodurre. Serve a ordinare le fonti mettendo davanti la
+  /// versione sottotitolata, che e' il default di chi non ha ancora scelto.
+  bool get isSubtitled {
+    final raw = language?.toLowerCase().trim();
+    return raw == 'sub' || raw == 'subit' || raw == 'subs' || raw == 'subbed';
+  }
 
   /// true se l'app puo' riprodurre questa sorgente da sola.
   ///
@@ -76,8 +117,24 @@ class EpisodeSource {
   /// solo l'altra invece di un separatore appeso a niente.
   String get label {
     final qualityLabel = _asString(quality);
-    final languageLabel = switch (_asString(language)?.toLowerCase()) {
-      'it' || 'ita' || 'italian' || 'sub' || 'subit' => 'SUB',
+    final raw = _asString(language)?.toLowerCase();
+
+    // La lingua e la modalita' audio sono due cose diverse, e qui erano state
+    // confuse: `ita` e `sub` finivano nella stessa etichetta `SUB`. Ma `ita`
+    // vuol dire che l'audio e' gia' italiano, cioe' doppiaggio, mentre `sub`
+    // vuol dire che l'audio e' giapponese con sottotitoli. Un utente italiano
+    // che leggeva "720p SUB" su una traccia con audio italiano apriva la
+    // sorgente aspettandosi i sottotitoli e si trovava la voce italiana: due
+    // righe diverse nella stessa lista, con la stessa etichetta, che
+    // descrivevano due cose opposte.
+    final languageLabel = switch (raw) {
+      // Italiano gia' doppiato: la lingua si puo' nominare per esteso perche'
+      // e' la lingua dell'utente, non una scelta di audio.
+      'it' || 'ita' || 'italian' => 'ITA',
+      // Qui invece la lingua resta originale e cambia la modalita': e'
+      // sottotitolato, quindi si dice "SUB" perche' e' questo che l'utente
+      // sceglie.
+      'sub' || 'subit' || 'subs' || 'subbed' => 'SUB',
       'dub' || 'dubbed' => 'DUB',
       'en' || 'eng' || 'english' => 'ENG',
       'ja' || 'jpn' || 'japanese' => 'JPN',
@@ -89,14 +146,128 @@ class EpisodeSource {
     return '$qualityLabel $languageLabel';
   }
 
+  /// Etichetta che distingue due sorgenti altrimenti identiche.
+  ///
+  /// [label] descrive il formato, e il formato puo' non bastare: due provider
+  /// diversi possono offrire lo stesso 1080p sottotitolato. Senza un
+  /// discriminante la riga dei codici mostra due pastiglie uguali e l'utente
+  /// non ha modo di sap quale provare per primo — deve indovinare, e se la
+  /// prima non parte la seconda sembra essere un'altra copia della stessa.
+  ///
+  /// Il numero e' la posizione nell'elenco, non un numero di versione: quando
+  /// due sorgenti hanno lo stesso formato, "1080p SUB" e "1080p SUB (2)" sono
+  /// l'unico modo che ha la pastiglia di dire "prova le due, in quest'ordine".
+  /// Il formato resta per primo perche' e' quello che si cerca.
+  String labelledAt(int position) {
+    final base = label;
+    return position <= 1 ? base : '$base ($position)';
+  }
+
   factory EpisodeSource.parse(Map<String, dynamic> row) => EpisodeSource(
         id: _asString(row['id']) ?? '',
-        url: _asString(row['source_url']) ?? '',
+        url: _asString(row['source_url']),
+        canonicalUrl: _asString(row['canonical_url']),
         type: EpisodeSourceType.fromWire(_asString(row['source_type'])) ??
             EpisodeSourceType.mp4,
         quality: _asString(row['quality']),
         language: _asString(row['language']),
+        providerSlug: _asString(row['provider_slug']),
+        providerLabel: _asString(row['provider_label']),
       );
+
+  /// L'indirizzo da mettere in pasto al player.
+  ///
+  /// Fallisce se non ce n'e' nessuno dei due, il che in una lista ben costruita
+  /// non accade: una fonte ha sempre un indirizzo riproducibile oppure uno da
+  /// risolvere. Restituisce `null` invece di scegliere da sola perche' la scelta
+  /// fra "provo a riprodurre" e "chiedo il resolver" e' del player, che sa
+  /// cosa puo' fare.
+  String? get playbackAddress => url ?? canonicalUrl;
+}
+
+/// Una fonte dopo che il resolver l'ha resa riproducibile.
+///
+/// Questo tipo non entra in [EpisodeSource] e non viene salvato: esiste per il
+/// tempo di una riproduzione. E' la copia di `source_url` che i provider veri
+/// non possono dare, perche' contiene un token con una scadenza e copre una
+/// sola richiesta — metterlo in colonna trasformerebbe il catalogo in un magazzino
+/// di link morti, che e' il problema da cui siamo partiti.
+///
+/// Gli header sono parte del risultato e non un dettaglio: senza `Referer` o
+/// `Authorization` molti CDN rispondono 403 anche con l'URL giusto, e il
+/// sintomo sarebbe "questa fonte non parte" senza che nessuno capisca perche'.
+class ResolvedSource {
+  const ResolvedSource({
+    required this.sourceId,
+    required this.resolvedUrl,
+    required this.headers,
+    required this.sourceType,
+    this.canonicalUrl,
+    this.providerSlug,
+    this.expiresAt,
+  });
+
+  final String sourceId;
+  final String resolvedUrl;
+  final Map<String, String> headers;
+  final EpisodeSourceType sourceType;
+
+  /// L'indirizzo di partenza, per i log di debug.
+  final String? canonicalUrl;
+  final String? providerSlug;
+
+  /// Quando il link smette di valere. `null` se il provider non lo dichiara,
+  /// che e' il caso di un link semplice senza scadenza.
+  final DateTime? expiresAt;
+
+  /// true se il link e' ancora buono almeno per un minuto.
+  ///
+  /// Quel minuto e' il margine perche' la richiesta ci mette: aprire un link che
+  /// scade tra due secondi fa fallirebbe il player mentre sembrerebbe un
+  /// problema di rete.
+  bool get isFresh {
+    final expiry = expiresAt;
+    if (expiry == null) return true;
+    return expiry.isAfter(DateTime.now().add(const Duration(minutes: 1)));
+  }
+
+  factory ResolvedSource.parse(Map<String, dynamic> row) => ResolvedSource(
+        sourceId: _asString(row['source_id']) ?? '',
+        resolvedUrl: _asString(row['resolved_url']) ?? '',
+        headers: _asHeaders(row['headers']),
+        sourceType: EpisodeSourceType.fromWire(_asString(row['source_type'])) ??
+            EpisodeSourceType.mp4,
+        canonicalUrl: _asString(row['canonical_url']),
+        providerSlug: _nested(row['provider'], 'slug'),
+        expiresAt: _asDate(row['expires_at']),
+      );
+}
+
+/// Una parola dentro un oggetto annidato, se l'oggetto c'e'.
+///
+/// Il resolver manda `provider: { slug, label, adapter }` invece di tre campi
+/// piatti: e' un'informazione che viaggia insieme e che ha senso leggere
+/// insieme. Qui si restituisce `null` invece di sollevare, perche' la stessa
+/// lettura serve anche quando la risposta e' un errore e quel campo non c'e'.
+String? _nested(Object? value, String key) {
+  if (value is! Map) return null;
+  return _asString(value[key]);
+}
+
+/// Gli header vengono dal backend come `Map<String, dynamic>`.
+///
+/// La conversione e' esplicita perche' i valori arrivano come `Object?`: una
+/// `cast` lascerebbe dentro i numeri, e un header con un numero dentro viene
+/// rifiutato dal client HTTP in un punto in cui il messaggio d'errore parla di
+/// rete e non di header.
+Map<String, String> _asHeaders(Object? value) {
+  if (value is! Map) return const {};
+
+  return {
+    for (final entry in value.entries)
+      if (_asString(entry.key) != null && _asString(entry.value) != null)
+        entry.key as String: entry.value as String,
+  };
 }
 
 /// Un episodio con tutto quello che la lista sa dire di lui.

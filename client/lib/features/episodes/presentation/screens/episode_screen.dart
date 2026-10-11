@@ -263,6 +263,13 @@ class _PlayerBlock extends ConsumerWidget {
           sources: list,
           episode: episode,
           saver: saver,
+          // Il resolver viene preso dal provider e non passato dal chiamante:
+          // e' la stessa operazione che ha caricato le fonti, quindi deve
+          // attraversare lo stesso client gia' collegato. Senza questo, una
+          // schermata che apre un episodio da una notifica — e che non ha ancora
+          // costruito il blocco fonti — si troverebbe un player senza resolver e
+          // tutte le fonti canoniche sembrerebbero rotte.
+          resolve: ref.read(episodesRepositoryProvider).resolveSource,
         );
       },
     );
@@ -275,11 +282,16 @@ class _Playable extends StatefulWidget {
     required this.sources,
     required this.episode,
     required this.saver,
+    required this.resolve,
   });
 
   final List<EpisodeSource> sources;
   final Episode episode;
   final WatchProgressSaver saver;
+
+  /// Risolutore passato al player per le fonti che hanno solo l'indirizzo
+  /// canonico.
+  final SourceResolver resolve;
 
   @override
   State<_Playable> createState() => _PlayableState();
@@ -303,7 +315,13 @@ class _PlayableState extends State<_Playable> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final safeIndex = _index.clamp(0, widget.sources.length - 1);
+    // Le fonti sottotitolate vengono prima: l'ordine del backend non ha un
+    // criterio, e un player che parte dalla traccia doppiata quando esiste
+    // quella sottotitolata decide una preferenza al posto dell'utente. Cosi'
+    // la prima fonte e la scelta di chi non ha ancora scelto, e le due
+    // pastiglie restano comunque entrambe a un tocco di distanza.
+    final sources = _subtitledFirst(widget.sources);
+    final safeIndex = _index.clamp(0, sources.length - 1);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -317,9 +335,16 @@ class _PlayableState extends State<_Playable> {
               // controller del precedente e per un frame mostra il video
               // vecchio sotto il titolo del nuovo.
               key: ValueKey('player-${widget.episode.id}'),
-              sources: widget.sources,
+              sources: sources,
               sourceIndex: safeIndex,
               resumeFrom: Duration(seconds: widget.episode.progressTime),
+              // Il resolver arriva a ogni ricostruzione perche' la schermata
+              // puo' cambiare provider mentre e' aperta — dopo un ricollegamento
+              // dell'utente, per esempio — e il player deve parlare con quello
+              // nuovo. Il player non lo chiama da solo perche' potrebbe, ma
+              // tenerlo in mano e' la cosa che gli permette di accorgersi che e'
+              // cambiato.
+              resolver: widget.resolve,
               onSourceChanged: (index) {
                 if (index == _index || !mounted) return;
                 setState(() => _index = index);
@@ -333,7 +358,7 @@ class _PlayableState extends State<_Playable> {
         ),
         const SizedBox(height: ArSpace.sm),
         _SourceSelector(
-          sources: widget.sources,
+          sources: sources,
           selected: safeIndex,
           onSelect: (index) => setState(() => _index = index),
         ),
@@ -342,13 +367,29 @@ class _PlayableState extends State<_Playable> {
         // quando hanno la stessa etichetta, e una riga di indirizzi lunghi
         // spingerebbe il resto della pagina sotto.
         Text(
-          'Formato ${widget.sources[safeIndex].type.label.toLowerCase()}',
+          'Formato ${sources[safeIndex].type.label.toLowerCase()}',
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ],
     );
+  }
+
+  /// Fonti con le sottotitolate davanti, a parita' di ordine stabile.
+  ///
+  /// Un `sort` sul solo `isSubtitled` non e' stabile in Dart e mescolerebbe le
+  /// fonti che condividono l'ordine: qui si costruiscono due liste e si
+  /// concatena, cosi' l'ordine relativo del backend resta.
+  static List<EpisodeSource> _subtitledFirst(List<EpisodeSource> sources) {
+    final subtitled = <EpisodeSource>[];
+    final dubbed = <EpisodeSource>[];
+
+    for (final source in sources) {
+      (source.isSubtitled ? subtitled : dubbed).add(source);
+    }
+
+    return [...subtitled, ...dubbed];
   }
 }
 
@@ -381,13 +422,23 @@ class _SourceSelector extends StatelessWidget {
       );
     }
 
+    // Il numero distingue solo le sorgenti che si somigliano. Numerarle
+    // tutte costerebbe una pastiglia con dentro "(2)" accanto a una che dice
+    // gia' "720p DUB": l'utente leggerebbe un numero come se fosse una
+    // priorita', mentre non lo e'.
+    final duplicati = <String, int>{};
+    for (final source in sources) {
+      duplicati[source.label] = (duplicati[source.label] ?? 0) + 1;
+    }
+    final numerate = duplicati.values.any((n) => n > 1);
+
     return Wrap(
       spacing: ArSpace.xs,
       runSpacing: ArSpace.xs,
       children: [
         for (var i = 0; i < sources.length; i++)
           ArChip(
-            label: sources[i].label,
+            label: numerate ? sources[i].labelledAt(i + 1) : sources[i].label,
             selected: i == selected,
             icon: sources[i].isPlayable ? null : Icons.open_in_new_rounded,
             onTap: () => onSelect(i),

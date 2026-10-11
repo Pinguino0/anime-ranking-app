@@ -114,6 +114,26 @@ void main() {
       expect(entry.episodes, 39);
     });
 
+    test('displayTitle preferisce il titolo italiano del join', () {
+      final withIt = WatchlistEntry.parse({
+        'id': 'w1',
+        'group_id': 'g1',
+        'anime_id': 'a1',
+        'anime': {'title': 'Shingeki no Kyojin', 'title_it': "L'attacco dei giganti"},
+      });
+      expect(withIt.italianTitle, "L'attacco dei giganti");
+      expect(withIt.displayTitle, "L'attacco dei giganti");
+
+      final noIt = WatchlistEntry.parse({
+        'id': 'w1',
+        'group_id': 'g1',
+        'anime_id': 'a1',
+        'anime': {'title': 'Trigun'},
+      });
+      expect(noIt.italianTitle, isNull);
+      expect(noIt.displayTitle, 'Trigun');
+    });
+
     test('il progresso non supera l uno', () {
       final entry = WatchlistEntry.parse({
         'id': 'w1',

@@ -68,6 +68,21 @@ abstract interface class AuthRepository {
   /// consentirebbe di enumerare gli account registrati.
   Future<void> sendPasswordReset(String email);
 
+  /// Emette quando l'app riceve un link di recupero password e Supabase
+  /// stabilisce la sessione di recupero.
+  ///
+  /// E' un evento a se' e non un semplice cambio di sessione perche' va
+  /// distinto dagli accessi normali: durante il recupero l'utente risulta
+  /// tecnicamente collegato, ma l'app deve prima costringerlo a scegliere una
+  /// password nuova invece di lasciarlo entrare con quella vecchia.
+  Stream<void> watchPasswordRecovery();
+
+  /// Imposta una nuova password per l'utente della sessione corrente.
+  ///
+  /// Si usa alla fine del recupero: la sessione aperta dal link di reset e'
+  /// l'unica che autorizza il cambio senza conoscere la vecchia password.
+  Future<void> updatePassword(String password);
+
   /// Scollega l'utente.
   Future<void> signOut();
 }
@@ -146,6 +161,22 @@ class SupabaseAuthRepository implements AuthRepository {
     await _client.auth.signOut();
   }
 
+  @override
+  Stream<void> watchPasswordRecovery() => _client.auth.onAuthStateChange
+      .where((event) => event.event == AuthChangeEvent.passwordRecovery)
+      .map<void>((_) {});
+
+  @override
+  Future<void> updatePassword(String password) async {
+    try {
+      await _client.auth.updateUser(UserAttributes(password: password));
+    } on AuthException catch (e) {
+      throw AuthFailure(_messageForUpdatePassword(e.message));
+    } catch (_) {
+      throw const AuthFailure('Connessione assente o troppo lenta. Riprova.');
+    }
+  }
+
   /// Traduce i messaggi di Supabase in italiano.
   ///
   /// Supabase restituisce testo inglese libero, quindi si cerca per
@@ -177,5 +208,19 @@ class SupabaseAuthRepository implements AuthRepository {
       return 'Troppe richieste. Attendi qualche minuto e riprova.';
     }
     return 'Registrazione non riuscita. Riprova.';
+  }
+
+  String _messageForUpdatePassword(String raw) {
+    final m = raw.toLowerCase();
+    if (m.contains('password should be at least')) {
+      return 'La password deve essere lunga almeno 6 caratteri.';
+    }
+    if (m.contains('should be different') || m.contains('old password')) {
+      return 'La nuova password deve essere diversa dalla precedente.';
+    }
+    if (m.contains('rate limit') || m.contains('too many')) {
+      return 'Troppe richieste. Attendi qualche minuto e riprova.';
+    }
+    return 'Cambio password non riuscito. Riprova.';
   }
 }

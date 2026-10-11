@@ -1,5 +1,6 @@
 import '../../../../core/ui/anime_thumb.dart';
 import '../../../../core/ui/content_row.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,11 +8,13 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../../anime/domain/anime.dart';
 import '../../domain/ranking.dart';
 import '../ranking_controller.dart';
 import '../widgets/rank_podium.dart';
+import '../widgets/rate_sheet.dart';
 
 /// Classifica di un gruppo.
 ///
@@ -50,11 +53,16 @@ class _RankingScreenState extends ConsumerState<RankingScreen>
   Widget build(BuildContext context) {
     final groupId = widget.groupId;
     final stats = ref.watch(groupStatsProvider(groupId));
+    // L'accento della sezione: dentro la classifica e' l'oro che l'app riserva
+    // gia' ai voti e alle medaglie.
+    final accent = SectionAccentScope.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.groupName == null ? 'Classifica' : 'Classifica · ${widget.groupName}',
+          widget.groupName == null
+              ? 'Classifica'
+              : 'Classifica · ${widget.groupName}',
           // Il nome del gruppo puo' essere lungo: senza troncamento
           // l'appbar su telefono spingerebbe fuori il bottone indietro.
           maxLines: 1,
@@ -74,6 +82,11 @@ class _RankingScreenState extends ConsumerState<RankingScreen>
           // vot...") e le schede sembrano rotte.
           isScrollable: true,
           tabAlignment: TabAlignment.start,
+          // Il selettore segue l'accento della sezione: nella classifica e'
+          // l'oro del podio, non il viola del marchio. Fuori dalla shell
+          // l'accento e' la home, quindi resta il colore di prima.
+          indicatorColor: accent.base,
+          labelColor: accent.base,
           tabs: const [
             Tab(text: 'Generale'),
             Tab(text: 'Più amati'),
@@ -82,18 +95,36 @@ class _RankingScreenState extends ConsumerState<RankingScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabs,
+      body: Column(
         children: [
-          _StandardTab(groupId: groupId),
-          _SpecialTab(groupId: groupId, kind: SpecialRankingKind.top),
-          _SpecialTab(groupId: groupId, kind: SpecialRankingKind.mostVoted),
-          _SpecialTab(groupId: groupId, kind: SpecialRankingKind.divisive),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                _StandardTab(groupId: groupId),
+                _SpecialTab(groupId: groupId, kind: SpecialRankingKind.top),
+                _SpecialTab(
+                  groupId: groupId,
+                  kind: SpecialRankingKind.mostVoted,
+                ),
+                _SpecialTab(
+                  groupId: groupId,
+                  kind: SpecialRankingKind.divisive,
+                ),
+              ],
+            ),
+          ),
+          // La striscia dei totali sta nel corpo e non come
+          // `bottomNavigationBar`: dentro la shell c'e' gia' la barra di
+          // navigazione in basso, e due barre impilate rubavano altezza al
+          // contenuto e sembravano una sola cosa rotta.
+          stats.maybeWhen(
+            data: (data) => data.isEmpty
+                ? const SizedBox.shrink()
+                : _StatsStrip(stats: data),
+            orElse: () => const SizedBox.shrink(),
+          ),
         ],
-      ),
-      bottomNavigationBar: stats.maybeWhen(
-        data: (data) => data.isEmpty ? null : _StatsStrip(stats: data),
-        orElse: () => null,
       ),
     );
   }
@@ -113,7 +144,9 @@ class _RankingScreenState extends ConsumerState<RankingScreen>
 
     await ref.read(rankingProvider(groupId).future);
     if (!mounted) return;
-    messenger.showSnackBar(const SnackBar(content: Text('Classifica aggiornata.')));
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Classifica aggiornata.')),
+    );
   }
 }
 
@@ -138,16 +171,31 @@ class _StatsStrip extends StatelessWidget {
         border: Border(top: BorderSide(color: ArColors.borderSoft)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: ArSpace.md, vertical: ArSpace.sm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: ArSpace.md,
+          vertical: ArSpace.sm,
+        ),
         child: SafeArea(
           top: false,
           child: Row(
             children: [
-              _Stat(label: 'Membri', value: stats.memberCount.toDouble(), format: _group),
+              _Stat(
+                label: 'Membri',
+                value: stats.memberCount.toDouble(),
+                format: _group,
+              ),
               const _Divider(),
-              _Stat(label: 'Anime votati', value: stats.animeRated.toDouble(), format: _group),
+              _Stat(
+                label: 'Anime votati',
+                value: stats.animeRated.toDouble(),
+                format: _group,
+              ),
               const _Divider(),
-              _Stat(label: 'Voti', value: stats.totalVotes.toDouble(), format: _group),
+              _Stat(
+                label: 'Voti',
+                value: stats.totalVotes.toDouble(),
+                format: _group,
+              ),
               const _Divider(),
               _Stat(label: 'Media', value: stats.groupMean, format: _trim),
             ],
@@ -196,11 +244,7 @@ class _Divider extends StatelessWidget {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({
-    required this.label,
-    required this.value,
-    required this.format,
-  });
+  const _Stat({required this.label, required this.value, required this.format});
 
   final String label;
 
@@ -302,7 +346,11 @@ class _StandardTab extends ConsumerWidget {
                           ],
                         ),
                       )
-                    : _PagedList(rows: rows, groupId: groupId, controller: controller),
+                    : _PagedList(
+                        rows: rows,
+                        groupId: groupId,
+                        controller: controller,
+                      ),
               ),
             ),
           ],
@@ -345,7 +393,8 @@ class _PagedListState extends ConsumerState<_PagedList> {
     // La pagina va letta al momento dello scroll, non una volta sola in
     // `build`: `build` non gira a ogni scatto di rotella e costerebbe di
     // ricostruire tutta la lista a ogni pixel.
-    _onScroll = () => _maybeLoadMore(ref.read(rankingPaginationProvider(widget.groupId)));
+    _onScroll = () =>
+        _maybeLoadMore(ref.read(rankingPaginationProvider(widget.groupId)));
     _scroll.addListener(_onScroll);
   }
 
@@ -407,7 +456,12 @@ class _PagedListState extends ConsumerState<_PagedList> {
             ),
           ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(ArSpace.md, ArSpace.sm, ArSpace.md, ArSpace.lg),
+          padding: const EdgeInsets.fromLTRB(
+            ArSpace.md,
+            ArSpace.sm,
+            ArSpace.md,
+            ArSpace.lg,
+          ),
           sliver: SliverList.separated(
             itemCount: rest.length + 1,
             separatorBuilder: (_, _) => const SizedBox(height: ArSpace.xs),
@@ -428,7 +482,10 @@ class _PagedListState extends ConsumerState<_PagedList> {
                 );
               }
 
-              return _LoadMore(groupId: widget.groupId, controller: widget.controller);
+              return _LoadMore(
+                groupId: widget.groupId,
+                controller: widget.controller,
+              );
             },
           ),
         ),
@@ -482,7 +539,9 @@ class _LoadMore extends ConsumerWidget {
             Text(
               error.message,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -517,7 +576,12 @@ class _SpecialTab extends ConsumerWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(ArSpace.md, ArSpace.sm, ArSpace.md, 0),
+          padding: const EdgeInsets.fromLTRB(
+            ArSpace.md,
+            ArSpace.sm,
+            ArSpace.md,
+            0,
+          ),
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -535,7 +599,9 @@ class _SpecialTab extends ConsumerWidget {
             loading: () => const _RankingSkeleton(rows: 5),
             error: (error, _) => ErrorState(
               message: _errorText(error),
-              onRetry: () => ref.read(specialRankingProvider((groupId, kind)).notifier).refresh(),
+              onRetry: () => ref
+                  .read(specialRankingProvider((groupId, kind)).notifier)
+                  .refresh(),
             ),
             data: (rows) {
               if (rows.isEmpty) {
@@ -545,23 +611,25 @@ class _SpecialTab extends ConsumerWidget {
                     // "Divisivi" ha una soglia di 3 voti imposta dal backend:
                     // dire il numero rende il vuoto comprensibile invece che
                     // apparentemente rotto.
-                    SpecialRankingKind.divisive =>
-                      'Servono almeno 3 voti sullo stesso anime per misurare quanto sono divise le opinioni.',
-                    SpecialRankingKind.mostVoted =>
-                      'Nessun anime ha ancora ricevuto un voto in questo gruppo.',
-                    SpecialRankingKind.top => 'Nessun anime votato in questo gruppo.',
+                    SpecialRankingKind.divisive => 'Servono almeno 3 voti sullo stesso anime per misurare quanto sono divise le opinioni.',
+                    SpecialRankingKind.mostVoted => 'Nessun anime ha ancora ricevuto un voto in questo gruppo.',
+                    SpecialRankingKind.top =>
+                      'Nessun anime votato in questo gruppo.',
                   },
                 );
               }
 
               // Come nella classifica principale: il podio prende i primi tre e
               // la lista riprende dal quarto, ma solo se i tre posti esistono.
-              final start = rows.length >= RankPodium.places ? RankPodium.places : 0;
+              final start = rows.length >= RankPodium.places
+                  ? RankPodium.places
+                  : 0;
               final rest = rows.sublist(start);
 
               return RefreshIndicator(
-                onRefresh: () =>
-                    ref.read(specialRankingProvider((groupId, kind)).notifier).refresh(),
+                onRefresh: () => ref
+                    .read(specialRankingProvider((groupId, kind)).notifier)
+                    .refresh(),
                 child: CustomScrollView(
                   slivers: [
                     if (start > 0)
@@ -582,7 +650,8 @@ class _SpecialTab extends ConsumerWidget {
                       ),
                       sliver: SliverList.separated(
                         itemCount: rest.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: ArSpace.xs),
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(height: ArSpace.xs),
                         itemBuilder: (context, i) => SpecialRankingRow(
                           entry: rest[i],
                           revealMs: (i * 35).clamp(0, 280),
@@ -612,12 +681,13 @@ PodiumEntry _specialPodiumOf(BuildContext context, SpecialRankingEntry entry) {
   final anime = AnimeEntry(
     externalId: entry.animeId,
     title: entry.title,
+    italianTitle: entry.italianTitle,
     imageUrl: entry.imageUrl,
   );
 
   return PodiumEntry(
     position: entry.position,
-    title: entry.title,
+    title: entry.displayTitle,
     imageUrl: entry.imageUrl,
     valueText: valueText,
     valueTitle: valueTitle,
@@ -634,7 +704,7 @@ PodiumEntry _podiumOf(BuildContext context, RankingEntry entry) {
 
   return PodiumEntry(
     position: entry.position,
-    title: entry.title,
+    title: entry.displayTitle,
     imageUrl: entry.imageUrl,
     // Sul podio la media e' il numero grande e i voti vanno sotto con la loro
     // etichetta: la barra di sotto, che nella lista tiene conto di quanto e'
@@ -642,7 +712,8 @@ PodiumEntry _podiumOf(BuildContext context, RankingEntry entry) {
     // podio dice gia' la stessa cosa.
     valueText: entry.meanScoreLabel ?? '—',
     valueTitle: 'media',
-    secondaryText: '${entry.voteCount} ${entry.voteCount == 1 ? 'voto' : 'voti'}',
+    secondaryText:
+        '${entry.voteCount} ${entry.voteCount == 1 ? 'voto' : 'voti'}',
     secondaryTitle: '',
     heroTag: anime.heroTag,
     onTap: () => context.push(AppRoutes.animeDetail, extra: anime),
@@ -658,11 +729,11 @@ PodiumEntry _podiumOf(BuildContext context, RankingEntry entry) {
 /// 0:00:05" non dice all'utente cosa fare, e il prompt chiede esplicitamente
 /// che gli errori tecnici non arrivino mai a schermo.
 String _errorText(Object error) => switch (error) {
-      final RankingFailure failure => failure.message,
-      // `toString` e non il tipo: almeno il nome della classe resta e un utente
-      // che la riporta puo' far capire da dove viene il problema.
-      _ => 'Non e stato possibile caricare la classifica.',
-    };
+  final RankingFailure failure => failure.message,
+  // `toString` e non il tipo: almeno il nome della classe resta e un utente
+  // che la riporta puo' far capire da dove viene il problema.
+  _ => 'Non e stato possibile caricare la classifica.',
+};
 
 /// Scheletro della classifica mentre le righe arrivano.
 ///
@@ -679,7 +750,12 @@ class _RankingSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(ArSpace.md, ArSpace.sm, ArSpace.md, ArSpace.lg),
+      padding: const EdgeInsets.fromLTRB(
+        ArSpace.md,
+        ArSpace.sm,
+        ArSpace.md,
+        ArSpace.lg,
+      ),
       physics: const NeverScrollableScrollPhysics(),
       itemCount: rows,
       separatorBuilder: (_, _) => const SizedBox(height: ArSpace.xs),
@@ -713,18 +789,18 @@ class _RankingSkeleton extends StatelessWidget {
 ///
 /// La riga porta l'id interno di `public.anime` e il minimo dei dati, quindi
 /// l'opera viene composta solo con quelli: la scheda mostra la realta' dei dati
-/// che ha, senza riempirsi i buchi. Un voto di MyAnimeList o una copertina
-/// inventati per far sembrare la scheda completa sarebbero peggio di un
-/// dettaglio assente, che almeno si vede che manca.
+/// che ha, senza riempirsi i buchi. Un voto del catalogo esterno o una
+/// copertina inventati per far sembrare la scheda completa sarebbero peggio di
+/// un dettaglio assente, che almeno si vede che manca.
 AnimeEntry _animeOf(RankingEntry entry) => AnimeEntry(
-      externalId: entry.animeId,
-      title: entry.title,
-      japaneseTitle: entry.japaneseTitle,
-      imageUrl: entry.imageUrl,
-      episodes: entry.episodes,
-      year: entry.year,
-      genres: entry.genres,
-    );
+  externalId: entry.animeId,
+  title: entry.title,
+  italianTitle: entry.italianTitle,
+  imageUrl: entry.imageUrl,
+  episodes: entry.episodes,
+  year: entry.year,
+  genres: entry.genres,
+);
 
 /// Riga della classifica principale.
 ///
@@ -764,9 +840,7 @@ class RankingTable extends ConsumerWidget {
               // sul contenuto e non distribuisce lo spazio: senza un tetto, il
               // titolo di un anime lungo allargherebbe la tabella oltre lo
               // schermo e le colonne dei numeri finirebbero fuori vista.
-              DataCell(
-                SizedBox(width: 320, child: _AnimeCell(entry: entry)),
-              ),
+              DataCell(SizedBox(width: 320, child: _AnimeCell(entry: entry))),
               DataCell(Text(entry.meanScoreLabel ?? '-')),
               DataCell(Text('${entry.voteCount}')),
               DataCell(Text(entry.rankingScoreLabel)),
@@ -878,7 +952,7 @@ class _RankingCard extends StatelessWidget {
           const SizedBox(width: ArSpace.sm),
           AnimeThumb(
             url: entry.imageUrl,
-            title: entry.title,
+            title: entry.displayTitle,
             size: 52,
             radius: ArRadii.chip,
           ),
@@ -889,7 +963,7 @@ class _RankingCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  entry.title,
+                  entry.displayTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall,
@@ -899,7 +973,9 @@ class _RankingCard extends StatelessWidget {
                   _metaOf(entry),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textMid),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ArColors.textMid,
+                  ),
                 ),
                 if (factor != null) ...[
                   const SizedBox(height: ArSpace.xs),
@@ -922,7 +998,9 @@ class _RankingCard extends StatelessWidget {
               ),
               Text(
                 '${entry.voteCount} ${entry.voteCount == 1 ? 'voto' : 'voti'}',
-                style: theme.textTheme.labelSmall?.copyWith(color: ArColors.textLow),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: ArColors.textLow,
+                ),
               ),
             ],
           ),
@@ -999,6 +1077,7 @@ class SpecialRankingRow extends StatelessWidget {
     final anime = AnimeEntry(
       externalId: entry.animeId,
       title: entry.title,
+      italianTitle: entry.italianTitle,
       imageUrl: entry.imageUrl,
     );
 
@@ -1021,14 +1100,14 @@ class SpecialRankingRow extends StatelessWidget {
               const SizedBox(width: ArSpace.sm),
               AnimeThumb(
                 url: entry.imageUrl,
-                title: entry.title,
+                title: entry.displayTitle,
                 size: 52,
                 radius: ArRadii.chip,
               ),
               const SizedBox(width: ArSpace.sm),
               Expanded(
                 child: Text(
-                  entry.title,
+                  entry.displayTitle,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall,
@@ -1165,7 +1244,9 @@ class _PositionBadge extends StatelessWidget {
               color: top ? medal.withValues(alpha: 0.14) : Colors.transparent,
               borderRadius: BorderRadius.circular(ArRadii.chip - 2),
               border: Border.all(
-                color: top ? medal.withValues(alpha: 0.45) : ArColors.borderSoft,
+                color: top
+                    ? medal.withValues(alpha: 0.45)
+                    : ArColors.borderSoft,
               ),
             ),
             child: Text(
@@ -1211,7 +1292,7 @@ class _AnimeCell extends StatelessWidget {
 
     return Row(
       children: [
-        AnimeThumb(url: entry.imageUrl, title: entry.title),
+        AnimeThumb(url: entry.imageUrl, title: entry.displayTitle),
         const SizedBox(width: ArSpace.sm),
         Expanded(
           child: Column(
@@ -1219,7 +1300,7 @@ class _AnimeCell extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                entry.title,
+                entry.displayTitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleSmall,
@@ -1229,7 +1310,9 @@ class _AnimeCell extends StatelessWidget {
                   meta,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textMid),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ArColors.textMid,
+                  ),
                 ),
             ],
           ),
@@ -1273,7 +1356,7 @@ class _VoteButton extends ConsumerWidget {
       return IconButton(
         onPressed: () => _open(context, ref),
         icon: const Icon(Icons.star_border),
-        tooltip: 'Vota ${entry.title}',
+        tooltip: 'Vota ${entry.displayTitle}',
       );
     }
 
@@ -1285,7 +1368,9 @@ class _VoteButton extends ConsumerWidget {
       ),
       child: Text(
         mine.toStringAsFixed(mine == mine.roundToDouble() ? 0 : 1),
-        style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.primary),
+        style: theme.textTheme.titleMedium?.copyWith(
+          color: theme.colorScheme.primary,
+        ),
       ),
     );
   }
@@ -1302,128 +1387,20 @@ class _VoteButton extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      await ref.read(ratingProvider.notifier).rate(
-            groupId: groupId,
-            animeId: entry.animeId,
-            score: result,
-          );
+      await ref
+          .read(ratingProvider.notifier)
+          .rate(groupId: groupId, animeId: entry.animeId, score: result);
       messenger.showSnackBar(
-        SnackBar(content: Text('Voto di ${_formatVote(result)} a ${entry.title}.')),
+        SnackBar(
+          content: Text(
+            'Voto di ${formatVote(result)} a ${entry.displayTitle}.',
+          ),
+        ),
       );
     } on RankingFailure catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
-}
-
-/// Voto formattato per la conferma a schermo.
-///
-/// 7 e non "7.0", 7.5 e non "7.50": il testo di un messaggio non ha bisogno di
-/// due decimali, e l'allineamento a due cifree in una lista di messaggi e'
-/// rumore.
-String _formatVote(double value) =>
-    value == value.roundToDouble() ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
-
-/// Foglio di votazione.
-///
-/// Un cursore a passo 0.5 da 0 a 10 con il valore grande in alto: scegliere
-/// 7.5 con due cursori separati ("intero" e "mezzo punto") e' esatto ma
-/// scomodo, e una griglia di 21 pulsanti occuperebbe meta' schermo.
-///
-/// Stateful e non `StatefulBuilder` dentro uno stateless: il valore scelto
-/// deve sopravvivere al rebuild del foglio, e un campo su una classe senza
-/// stato viene ricreato a ogni build.
-class RateSheet extends StatefulWidget {
-  const RateSheet({required this.entry, super.key});
-
-  final RankingEntry entry;
-
-  @override
-  State<RateSheet> createState() => _RateSheetState();
-}
-
-class _RateSheetState extends State<RateSheet> {
-  /// Voto in modifica, null finche' l'utente non tocca il cursore.
-  double? _chosen;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final entry = widget.entry;
-
-    // Parte dal voto gia' dato: riaprire il foglio non deve far partire da
-    // zero un utente che sta solo correggendo un mezzo punto.
-    final value = _chosen ?? entry.myScore ?? 7;
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(entry.title, style: theme.textTheme.titleMedium),
-            if (entry.genres.isNotEmpty)
-              Text(
-                entry.genres.take(3).join(' · '),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            const SizedBox(height: 16),
-            Text(
-              _trim(value),
-              textAlign: TextAlign.center,
-              style: theme.textTheme.displayMedium?.copyWith(
-                color: theme.colorScheme.primary,
-              ),
-            ),
-            Slider(
-              value: value,
-              min: RatingValidators.min,
-              max: RatingValidators.max,
-              // 21 divisioni = 21 posizioni da 0 a 10 a passo 0.5: senza
-              // `divisions` il cursore si fermerebbe su valori che il CHECK
-              // del database rifiuta.
-              divisions: ((RatingValidators.max - RatingValidators.min) / RatingValidators.step)
-                  .round(),
-              label: value.toStringAsFixed(1),
-              onChanged: (v) => setState(() => _chosen = v),
-            ),
-            Text(
-              '0 = pessimo, 10 = capolavoro. Passi da mezzo punto.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Annulla'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(context).pop(value),
-                    child: const Text('Vota'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 7 e non "7.0", 7.5 e non "7.50": il numero grande in centro non ha bisogno
-  /// di due decimali per essere leggibile.
-  static String _trim(double value) => _formatVote(value);
 }
 
 class _EmptyState extends StatelessWidget {
@@ -1442,7 +1419,11 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.leaderboard_outlined, size: 48, color: theme.colorScheme.onSurfaceVariant),
+            Icon(
+              Icons.leaderboard_outlined,
+              size: 48,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(height: 16),
             Text(message, style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -1483,13 +1464,18 @@ class _OfflineBanner extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            Icon(Icons.wifi_off, size: 18, color: theme.colorScheme.onSecondaryContainer),
+            Icon(
+              Icons.wifi_off,
+              size: 18,
+              color: theme.colorScheme.onSecondaryContainer,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 'Classifica salvata${_savedAt(status.savedAt)}: non si aggiorna senza rete.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSecondaryContainer),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
               ),
             ),
           ],
@@ -1504,10 +1490,15 @@ class _OfflineBanner extends ConsumerWidget {
 
     final local = savedAt.toLocal();
     final now = DateTime.now();
-    final sameDay = local.year == now.year && local.month == now.month && local.day == now.day;
+    final sameDay =
+        local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day;
 
-    final time = '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-    return sameDay ? ' di oggi alle $time' : ' del ${local.day}/${local.month} alle $time';
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    return sameDay
+        ? ' di oggi alle $time'
+        : ' del ${local.day}/${local.month} alle $time';
   }
 }
-

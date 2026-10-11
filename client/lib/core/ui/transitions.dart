@@ -52,9 +52,10 @@ CustomTransitionPage<T> arRoute<T>({
           reverseCurve: ArMotion.exit,
         ),
         child: SlideTransition(
-          position: Tween<Offset>(begin: begin, end: end).animate(
-            CurvedAnimation(parent: animation, curve: ArMotion.enter),
-          ),
+          position: Tween<Offset>(
+            begin: begin,
+            end: end,
+          ).animate(CurvedAnimation(parent: animation, curve: ArMotion.enter)),
           child: ScaleTransition(
             // Leggera: sotto il 2% si nota come "approssimazione", sopra il 4%
             // sembra uno zoom. 1.5% e' appena percettibile e da' profondita'.
@@ -63,6 +64,44 @@ CustomTransitionPage<T> arRoute<T>({
             ),
             child: page,
           ),
+        ),
+      );
+    },
+  );
+}
+
+/// Transizione fra le sezioni della shell.
+///
+/// Le sezioni sono pari, non una "dentro" l'altra: uno scorrimento laterale
+/// direbbe "sei entrato in un posto nuovo" e suggerirebbe un indietro che non
+/// c'e'. Un incrocio di opacita' con una scala appena accennata dice invece "e'
+/// cambiato il contenuto della stessa cornice", che e' esattamente quello che
+/// succede quando si tocca una voce della barra.
+CustomTransitionPage<T> arSectionRoute<T>({
+  required Widget child,
+  String? name,
+  Object? arguments,
+}) {
+  return CustomTransitionPage<T>(
+    name: name,
+    arguments: arguments,
+    transitionDuration: ArMotion.base,
+    reverseTransitionDuration: ArMotion.fast,
+    child: child,
+    transitionsBuilder: (context, animation, secondaryAnimation, page) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: ArMotion.enter,
+        reverseCurve: ArMotion.exit,
+      );
+
+      return FadeTransition(
+        opacity: curved,
+        child: ScaleTransition(
+          // Sotto l'1%: giusto quel tanto che l'occhio sente il cambio come un
+          // passaggio e non come uno sfarfallio dello schermo.
+          scale: Tween<double>(begin: 0.99, end: 1).animate(curved),
+          child: page,
         ),
       );
     },
@@ -101,15 +140,16 @@ CustomTransitionPage<T> arDetailRoute<T>({
         // Sale di poco piu' di 6% dell'altezza: abbastanza da sembrare un
         // ingresso, poco da far aspettare.
         child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.06),
-            end: Offset.zero,
-          ).animate(
-            CurvedAnimation(
-              parent: animation,
-              curve: const Interval(0.15, 1, curve: ArMotion.enter),
-            ),
-          ),
+          position:
+              Tween<Offset>(
+                begin: const Offset(0, 0.06),
+                end: Offset.zero,
+              ).animate(
+                CurvedAnimation(
+                  parent: animation,
+                  curve: const Interval(0.15, 1, curve: ArMotion.enter),
+                ),
+              ),
           child: page,
         ),
       );
@@ -150,7 +190,8 @@ class ArReveal extends StatefulWidget {
   State<ArReveal> createState() => _ArRevealState();
 }
 
-class _ArRevealState extends State<ArReveal> with SingleTickerProviderStateMixin {
+class _ArRevealState extends State<ArReveal>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: widget.duration,
@@ -328,7 +369,10 @@ class ArStaggered extends StatelessWidget {
           () {
             final withinRow = columns > 1 ? i % columns : i;
             final rowStart = columns > 1 ? (i ~/ columns) * columns : 0;
-            final delay = ((rowStart + withinRow) * stepMs).clamp(0, maxDelayMs);
+            final delay = ((rowStart + withinRow) * stepMs).clamp(
+              0,
+              maxDelayMs,
+            );
 
             return ArReveal(
               key: ValueKey(i),
@@ -407,7 +451,9 @@ class ArGradientButton extends StatelessWidget {
     final button = DecoratedBox(
       decoration: BoxDecoration(
         gradient: enabled ? ArColors.brand : null,
-        color: enabled ? null : Theme.of(context).colorScheme.surfaceContainerHigh,
+        color: enabled
+            ? null
+            : Theme.of(context).colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(ArRadii.control),
         boxShadow: enabled
             ? ArShadows.glow(ArColors.primary, strength: 0.34)
@@ -440,10 +486,7 @@ class ArGradientButton extends StatelessWidget {
 
     return Opacity(
       opacity: enabled ? 1 : 0.45,
-      child: ArPressable(
-        onTap: onPressed,
-        child: button,
-      ),
+      child: ArPressable(onTap: onPressed, child: button),
     );
   }
 }

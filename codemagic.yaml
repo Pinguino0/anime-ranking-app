@@ -1,0 +1,94 @@
+# ============================================================================
+# codemagic.yaml — build di Animerank per iPhone (TestFlight)
+# ============================================================================
+# Xcode esiste solo su macOS, quindi da Windows l'unico modo di firmare un IPA
+# e' una macchina Mac in cloud. Questa e' quella di Codemagic: il piano gratuito
+# include 500 minuti di Mac M2 al mese, che bastano e avanzano per qualche build.
+#
+# Cosa fa questo workflow, in ordine:
+#   1. prende dall'Apple Developer Portal il certificato e il provisioning
+#      profile di distribuzione (usando la chiave API configurata in Codemagic);
+#   2. compila l'app in release con le stesse `--dart-define` dell'APK Android;
+#   3. carica l'IPA su App Store Connect, dove TestFlight lo distribuisce.
+#
+# La firma NON invecchia: se il certificato o il profilo scadono, Codemagic li
+# rigenera da solo alla build successiva. Per questo non c'e' niente di segreto
+# da incollare qui dentro.
+#
+# NOTA su iOS: l'app non si aggiorna da sola (Apple lo vieta). Gli aggiornamenti
+# li consegna TestFlight, non `app_releases`: e' per questo che su iPhone il gate
+# "c'e' da aggiornare" e' spento per scelta.
+# ============================================================================
+
+workflows:
+  ios-testflight:
+    name: iOS TestFlight
+    # La root del repo contiene la guida; l'app Flutter sta in `client/`.
+    working_directory: client
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    # Il nome deve combaciare ESATTAMENTE con la chiave App Store Connect
+    # creata in Codemagic (Team settings > Integrations > Developer Portal).
+    integrations:
+      app_store_connect: animerank-asc
+
+    environment:
+      # Firma automatica: Codemagic crea/recupera certificato e profilo di
+      # distribuzione dal bundle id indicato, senza file `.p12` a mano.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.animerank.animerank
+
+      # Stessa versione del Mac di sviluppo, cosi' la build non sorprende.
+      # Se Codemagic non la conoscesse, sostituire con `stable`.
+      flutter: 3.47.5
+      xcode: latest
+      cocoapods: default
+
+      vars:
+        # Chiave PUBBLICABILE: e' la stessa che finisce dentro APK e IPA, e che
+        # chiunque puo' leggere. La secret key non entra mai nella build.
+        SUPABASE_URL: "https://sjbstiexythmapxmrfyp.supabase.co"
+        SUPABASE_ANON_KEY: "sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc"
+
+    # Parte a mano dalla UI, oppure da sola quando pushi un tag `v1.2.3`.
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "v*"
+          include: true
+
+    scripts:
+      - name: Firma il progetto Xcode con i profili scaricati
+        script: xcode-project use-profiles
+
+      - name: Pacchetti Flutter
+        script: flutter packages pub get
+
+      - name: Analisi statica
+        script: flutter analyze
+
+      - name: Test
+        script: flutter test
+
+      - name: Build IPA per TestFlight
+        script: |
+          flutter build ipa --release \
+            --build-number=$(($BUILD_NUMBER)) \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Carica su App Store Connect e rende la build disponibile in TestFlight.
+        # I tester "interni" la vedono subito; per quelli "esterni" serve la
+        # revisione di Apple (di solito 1-2 giorni la prima volta).
+        submit_to_testflight: true

@@ -66,8 +66,19 @@ class FakeAuthRepository implements AuthRepository {
   int signUpCalls = 0;
   int signOutCalls = 0;
   int resetCalls = 0;
+  int updatePasswordCalls = 0;
+
+  /// Ultima password passata a [updatePassword], per verificarla nei test.
+  String? lastNewPassword;
+
+  /// Se valorizzato, [updatePassword] fallisce con questo errore.
+  Object? updatePasswordFailure;
 
   final _events = StreamController<AuthStatus>.broadcast();
+  final _recovery = StreamController<void>.broadcast();
+
+  /// Simula l'arrivo di un link di recupero password da Supabase.
+  void emitPasswordRecovery() => _recovery.add(null);
 
   /// Espone un cambio di sessione come farebbe Supabase.
   void emit(Session? next) {
@@ -111,10 +122,25 @@ class FakeAuthRepository implements AuthRepository {
   }
 
   @override
+  Stream<void> watchPasswordRecovery() => _recovery.stream;
+
+  @override
+  Future<void> updatePassword(String password) async {
+    updatePasswordCalls++;
+    lastNewPassword = password;
+    final failure = updatePasswordFailure;
+    if (failure != null) throw failure;
+    // Come Supabase: la sessione resta valida, l'utente e' collegato.
+  }
+
+  @override
   Future<void> signOut() async {
     signOutCalls++;
     emit(null);
   }
 
-  void dispose() => _events.close();
+  void dispose() {
+    _events.close();
+    _recovery.close();
+  }
 }

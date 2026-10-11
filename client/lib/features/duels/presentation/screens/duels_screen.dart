@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/anime_thumb.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../domain/duels.dart';
@@ -38,6 +39,8 @@ class _DuelsScreenState extends ConsumerState<DuelsScreen>
   @override
   Widget build(BuildContext context) {
     final groupId = widget.groupId;
+    // L'accento della sezione: nei duelli e' il rosso del testa a testa.
+    final accent = SectionAccentScope.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -55,6 +58,8 @@ class _DuelsScreenState extends ConsumerState<DuelsScreen>
         ],
         bottom: TabBar(
           controller: _tabs,
+          indicatorColor: accent.base,
+          labelColor: accent.base,
           tabs: const [
             Tab(text: 'Sfida'),
             Tab(text: 'Elo'),
@@ -367,7 +372,7 @@ class _DuelCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _DuelOption(
-                    title: pair.titleA,
+                    title: pair.displayTitleA,
                     imageUrl: pair.imageA,
                     isWinner: result?.animeId == pair.animeAId,
                     isLoser: result != null && result!.animeId != pair.animeAId,
@@ -380,7 +385,7 @@ class _DuelCard extends StatelessWidget {
                 const _Versus(),
                 Expanded(
                   child: _DuelOption(
-                    title: pair.titleB,
+                    title: pair.displayTitleB,
                     imageUrl: pair.imageB,
                     isWinner: result?.animeId == pair.animeBId,
                     isLoser: result != null && result!.animeId != pair.animeBId,
@@ -403,7 +408,7 @@ class _DuelCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _DuelOption(
-                        title: pair.titleA,
+                        title: pair.displayTitleA,
                         imageUrl: pair.imageA,
                         isWinner: result?.animeId == pair.animeAId,
                         isLoser: result != null && result!.animeId != pair.animeAId,
@@ -420,7 +425,7 @@ class _DuelCard extends StatelessWidget {
                     const SizedBox(width: ArSpace.sm),
                     Expanded(
                       child: _DuelOption(
-                        title: pair.titleB,
+                        title: pair.displayTitleB,
                         imageUrl: pair.imageB,
                         isWinner: result?.animeId == pair.animeBId,
                         isLoser: result != null && result!.animeId != pair.animeBId,
@@ -783,19 +788,22 @@ class _EloSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Stessa spaziatura orizzontale delle righe reali (`_EloTile`), dal token
+    // di pagina: cosi' la lista non si sposta di lato quando arrivano i dati.
+    final horizontal = ArSpace.page(context).left;
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: ArSpace.xs),
       itemCount: 8,
-      itemBuilder: (context, i) => const Padding(
+      itemBuilder: (context, i) => Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: ArSpace.md,
+          horizontal: horizontal,
           vertical: ArSpace.xxs,
         ),
-        child: Row(
+        // Le stesse forme di `_EloTile`: posizione, copertina, titolo, voto.
+        child: const Row(
           children: [
-            SkeletonBox(width: 28, height: 16),
-            SizedBox(width: ArSpace.sm),
-            SkeletonBox(width: 32, height: 32, radius: ArRadii.chip),
+            SizedBox(width: 28, child: SkeletonBox(width: 28, height: 16)),
+            SkeletonBox(width: 40, height: 40, radius: ArRadii.chip),
             SizedBox(width: ArSpace.sm),
             Expanded(child: SkeletonBox(height: 14)),
             SizedBox(width: ArSpace.md),
@@ -815,7 +823,12 @@ class _EloTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: EdgeInsets.all(ArSpace.page(context).left),
+      // Orizzontale dal token di pagina, verticale fisso: il respiro sopra e
+      // sotto la tabella non deve crescere con la larghezza dello schermo.
+      padding: EdgeInsets.symmetric(
+        horizontal: ArSpace.page(context).left,
+        vertical: ArSpace.lg,
+      ),
       child: Center(
         child: ConstrainedBox(
           // Contenitore largo con tabella: su schermi enormi la tabella si
@@ -839,11 +852,11 @@ class _EloTable extends StatelessWidget {
                     DataCell(
                       Row(
                         children: [
-                          AnimeThumb(url: row.imageUrl, title: row.title, size: 32),
+                          AnimeThumb(url: row.imageUrl, title: row.displayTitle, size: 32),
                           const SizedBox(width: ArSpace.sm),
                           Expanded(
                             child: Text(
-                              row.title,
+                              row.displayTitle,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -903,8 +916,11 @@ class _EloTile extends StatelessWidget {
     final delta = row.eloDelta;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: ArSpace.md,
+      // Stessa spaziatura orizzontale del resto della schermata (token di
+      // pagina): con `ArSpace.md` fisso, fra 700 e 900px la lista restava
+      // rientrata di 8px rispetto alle altre tab.
+      padding: EdgeInsets.symmetric(
+        horizontal: ArSpace.page(context).left,
         vertical: ArSpace.xxs,
       ),
       child: Row(
@@ -916,7 +932,7 @@ class _EloTile extends StatelessWidget {
             width: 28,
             child: _EloPosition(position: row.position),
           ),
-          AnimeThumb(url: row.imageUrl, title: row.title, size: 40),
+          AnimeThumb(url: row.imageUrl, title: row.displayTitle, size: 40),
           const SizedBox(width: ArSpace.sm),
           Expanded(
             child: Column(
@@ -924,7 +940,7 @@ class _EloTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  row.title,
+                  row.displayTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall,

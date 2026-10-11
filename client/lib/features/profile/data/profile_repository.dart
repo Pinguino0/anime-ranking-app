@@ -46,13 +46,25 @@ class SupabaseProfileRepository implements ProfileRepository {
   /// della cancellazione dell'account.
   static const List<String> buckets = ['avatars', 'group-images'];
 
-  String get _uid {
-    final id = _client.auth.currentUser?.id;
-    if (id == null) {
-      throw const ProfileFailure('Devi essere collegato.');
+  /// Sessione del collegato, o un errore che lo dice.
+  ///
+  /// La domanda va posta alla SESSIONE e non a `currentUser`. Sono due cose
+  /// diverse: `currentUser` puo' sopravvivere qualche istante a una sessione
+  /// scaduta o non ancora rinnovata. In quel momento la richiesta parte senza
+  /// il token, PostgREST la legge come richiesta anonima, e la RLS nasconde
+  /// tutte le righe rispondendo `[]`: `maybeSingle()` su una lista vuota
+  /// restituisce `null`, e il profilo risultava "non trovato" nel database
+  /// mentre era semplicemente invisibile. Il pulsante Riprova non poteva
+  /// funzionare perche' il problema non era il profilo.
+  Session get _session {
+    final session = _client.auth.currentSession;
+    if (session == null) {
+      throw const ProfileFailure('Sessione scaduta. Accedi di nuovo.');
     }
-    return id;
+    return session;
   }
+
+  String get _uid => _session.user.id;
 
   /// Fetch di una riga di `profiles` per l'utente collegato.
   ///
@@ -69,12 +81,14 @@ class SupabaseProfileRepository implements ProfileRepository {
     try {
       final row = await _fetchRow();
 
-      // Il profilo viene creato da un trigger su auth.users, quindi
-      // l'assenza significa trigger non eseguito, non "profilo vuoto".
-      // Fallire qui e' corretto: inventare un profilo porterebbe a salvare
-      // dati su una riga inesistente.
+      // Qui la sessione c'e' davvero: `_session` ha gia' escluso il caso in cui
+      // la riga fosse invisibile perche' la richiesta partiva anonima. Quindi
+      // l'assenza e' reale, e la sua causa e' il trigger su auth.users che non
+      // ha girato. Fallire e' corretto — inventare un profilo porterebbe a
+      // salvare dati su una riga inesistente — ma il messaggio non deve
+      // mandare a ricaricare una pagina che non cambierebbe niente.
       if (row == null) {
-        throw const ProfileFailure('Profilo non trovato. Ricarica la pagina.');
+        throw const ProfileFailure('Profilo non trovato. Ricaricare non basta.');
       }
 
       return UserProfile.parse(row);
@@ -127,6 +141,7 @@ class SupabaseProfileRepository implements ProfileRepository {
         NotificationPreferences.friendsColumn,
         NotificationPreferences.tournamentsColumn,
         NotificationPreferences.rankChangesColumn,
+        NotificationPreferences.recommendationsColumn,
       });
 
       if (row == null) return const NotificationPreferences();
@@ -145,6 +160,7 @@ class SupabaseProfileRepository implements ProfileRepository {
         NotificationPreferences.friendsColumn: preferences.friends,
         NotificationPreferences.tournamentsColumn: preferences.tournaments,
         NotificationPreferences.rankChangesColumn: preferences.rankChanges,
+        NotificationPreferences.recommendationsColumn: preferences.recommendations,
       }).eq('id', _uid);
     } on PostgrestException catch (e) {
       throw _translate(e);

@@ -94,7 +94,7 @@ class HomeScreen extends ConsumerWidget {
             icon: Icons.inventory_2_outlined,
             title: 'Catalogo ancora vuoto',
             message: 'Non c\'e\' ancora nessun anime salvato. '
-                'Apri la ricerca e fai partire una ricerca su Jikan: '
+                'Apri la ricerca e fai partire una ricerca online: '
                 'quello che trovi viene salvato qui e resta disponibile offline.',
           ),
         ),
@@ -120,7 +120,7 @@ class HomeScreen extends ConsumerWidget {
       title: row.title,
       subtitle: row.subtitle,
       itemCount: row.entries.length,
-      itemBuilder: (context, i) => _card(context, row.entries[i]),
+      itemBuilder: (context, i) => _card(context, row.entries[i], hero: false),
     );
   }
 
@@ -131,11 +131,8 @@ class HomeScreen extends ConsumerWidget {
   ///". Metterla in testa costringerebbe a scorrerla tutta per arrivare alle
   /// righe.
   Widget _catalog(BuildContext context, List<AnimeEntry> entries) {
-    final columns = Breakpoints.gridColumns(
-      MediaQuery.sizeOf(context).width,
-      min: 2,
-      max: 6,
-    );
+    final spacing = ArSpace.sm;
+    final padding = EdgeInsets.symmetric(horizontal: ArSpace.page(context).left);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,31 +145,60 @@ class HomeScreen extends ConsumerWidget {
           actionLabel: 'Cerca',
         ),
         const SizedBox(height: ArSpace.sm),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.symmetric(horizontal: ArSpace.page(context).left),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            // 2:3 del poster piu' lo spazio del titolo: senza, l'ultima riga
-            // verrebbe tagliata dal bordo inferiore.
-            mainAxisExtent: 200,
-            crossAxisSpacing: ArSpace.sm,
-            mainAxisSpacing: ArSpace.sm,
-          ),
-          itemCount: entries.length,
-          itemBuilder: (context, i) => _card(context, entries[i]),
+        // Le colonne si contano sulla larghezza davvero disponibile e non su un
+        // numero fisso per schermata: su un monitor largo un `crossAxisCount`
+        // calato a mano lascia celle enormi, e la locandina 2:3 si riduce a
+        //ritratto stretto al centro di un guscio vuoto. Qui la cella resta
+        // entro [minCell, maxCell] e l'altezza segue la cella, quindi la griglia
+        // riempie la larghezza senza buchi.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const minCell = 132.0;
+            const maxCell = 176.0;
+
+            final width = constraints.maxWidth - padding.horizontal;
+            // Due limiti, non uno: `maxCell` decide quante colonne ci stanno
+            // senza che la cella si allarghi troppo, `minCell` impedisce che su
+            // uno schermo enormouse le colonne diventino cosi' tante da rendere
+            // la locandina illeggibile. Il secondo e' il tetto.
+            final fit = (width / maxCell).ceil();
+            final readable = (width / minCell).floor().clamp(2, 12);
+            final columns = fit.clamp(2, readable);
+            final cell =
+                (width - spacing * (columns - 1)) / columns;
+
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: padding,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                // La card e' solo la locandina 2:3, quindi l'altezza della
+                // cella non e' un numero inventato: e' la cella per 3/2.
+                mainAxisExtent: cell * 3 / 2,
+                crossAxisSpacing: spacing,
+                mainAxisSpacing: spacing,
+              ),
+              itemCount: entries.length,
+              itemBuilder: (context, i) => _card(context, entries[i], hero: true),
+            );
+          },
         ),
       ],
     );
   }
 
-  Widget _card(BuildContext context, AnimeEntry entry) {
+  Widget _card(BuildContext context, AnimeEntry entry, {required bool hero}) {
     return AnimeCard(
-      title: entry.title,
+      title: entry.displayTitle,
       imageUrl: entry.imageUrl,
       score: entry.score,
-      heroTag: entry.heroTag,
+      // Solo la griglia catalogo mette l'Hero. Lo stesso anime puo' comparire
+      // in piu' righe in alto (per esempio "in corso" e "piu' votati"): due
+      // Hero con lo stesso tag nella stessa rotta fanno fallire l'animazione
+      // con "multiple heroes that share the same tag" e portano via la
+      // schermata intera. Un Hero per anime e' il limite, non uno per sezione.
+      heroTag: hero ? entry.heroTag : null,
       subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
       genres: entry.genres,
       // Toccando un poster si apre la scheda dell'opera, non la ricerca con il
@@ -265,7 +291,7 @@ class _Banner extends StatelessWidget {
       // Nessun ritardo: e' il primo elemento dello schermo e deve comparire
       // subito. Un banner che arriva dopo mezzo secondo sembra un caricamento.
       child: HeroBanner(
-        title: entry.title,
+        title: entry.displayTitle,
         imageUrl: entry.imageUrl,
         eyebrow: 'In evidenza',
         meta: facts.isEmpty ? null : facts,
@@ -279,9 +305,9 @@ class _Banner extends StatelessWidget {
 
   /// Prima frase, limitata.
   ///
-  /// Non un troncamento con i puntini: la sinossi di MyAnimeList spesso finisce
-  /// a meta' frase e il "..." su un periodo interrotto fa pensare a un testo
-  /// corrotto. Meglio chiudere sull'ultimo punto fermo trovato.
+  /// Non un troncamento con i puntini: la sinossi del catalogo esterno spesso
+  /// finisce a meta' frase e il "..." su un periodo interrotto fa pensare a un
+  /// testo corrotto. Meglio chiudere sull'ultimo punto fermo trovato.
   String? _shorten(String? text) {
     if (text == null || text.trim().isEmpty) return null;
 
@@ -304,9 +330,14 @@ class _HeroSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(ArSpace.md),
-      child: const SkeletonBox(height: 260, radius: ArRadii.card),
+    // Stessa altezza a piena larghezza del banner vero (380 su desktop, 300
+    // altrove). Il banner non ha padding ne' angoli smussati, quindi nemmeno lo
+    // scheletro ne ha: con un riquadro rientrato, al primo arrivo dei dati la
+    // pagina si assestava di colpo.
+    final isDesktop = Breakpoints.fromContext(context).isExpanded;
+    return SkeletonBox(
+      height: isDesktop ? 380 : 300,
+      radius: 0,
     );
   }
 }
@@ -321,30 +352,56 @@ class _RowsSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final horizontal = ArSpace.page(context).left;
+    final available = MediaQuery.sizeOf(context).width - horizontal * 2;
+    // Stesse soglie di `ContentRow._widthFor`: cosi' numero di caselle e
+    // larghezza combaciano con le card che compaiono al posto loro.
+    final count = switch (available) {
+      < 320 => 2,
+      < 520 => 3,
+      < 760 => 4,
+      < 1040 => 5,
+      _ => 6,
+    };
+    final cardWidth = (available - ArSpace.sm * (count - 1)) / count;
+    final cardHeight = cardWidth * 3 / 2;
+
+    // Un blocco per riga, con lo stesso padding verticale del `ContentRow`
+    // vero: l'intestazione scorre sotto il padding orizzontale di pagina, come
+    // fa il `SectionHeader`.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var r = 0; r < 3; r++) ...[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(ArSpace.md, ArSpace.sm, ArSpace.md, 0),
-            child: SkeletonBox(width: 170, height: 20),
-          ),
-          const SizedBox(height: ArSpace.sm),
+        for (var row = 0; row < 3; row++)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: ArSpace.md),
-            child: Row(
+            padding: const EdgeInsets.symmetric(vertical: ArSpace.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var i = 0; i < 4; i++) ...[
-                  const Expanded(
-                    child: SkeletonBox(height: 190, radius: ArRadii.card),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontal),
+                  child: const SkeletonBox(width: 170, height: 20),
+                ),
+                const SizedBox(height: ArSpace.sm),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontal),
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < count; i++) ...[
+                        Expanded(
+                          child: SkeletonBox(
+                            height: cardHeight,
+                            radius: ArRadii.card,
+                          ),
+                        ),
+                        if (i < count - 1) const SizedBox(width: ArSpace.sm),
+                      ],
+                    ],
                   ),
-                  if (i < 3) const SizedBox(width: ArSpace.sm),
-                ],
+                ),
               ],
             ),
           ),
-          const SizedBox(height: ArSpace.md),
-        ],
       ],
     );
   }

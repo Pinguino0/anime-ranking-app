@@ -85,6 +85,7 @@ void main() {
           friends: false,
           tournaments: false,
           rankChanges: false,
+          recommendations: false,
         ).allOff,
         isTrue,
       );
@@ -218,8 +219,24 @@ void main() {
       WidgetTester tester,
       Widget child, {
       FakeProfileRepository? profileRepo,
+      Size? surface,
     }) async {
       final p = profileRepo ?? repo;
+
+      // La superficie di default di un test e' 800x600, sotto i 900px che fanno
+      // scattare il layout a due colonne: senza questo la schermata larga non
+      // verrebbe mai costruita da nessun test, ed e' gia' successo che restasse
+      // nera su desktop senza che la suite se ne accorgesse.
+      //
+      // `tester.view` e non `binding.setSurfaceSize`: il secondo cambia la
+      // superficie del renderer ma lascia la MediaQuery a 800px, quindi il
+      // layout restava nel ramo da telefono e il test passava anche con il
+      // codice rotto.
+      if (surface != null) {
+        tester.view.physicalSize = surface;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+      }
       final router = GoRouter(
         initialLocation: '/profile',
         routes: [
@@ -252,6 +269,31 @@ void main() {
       expect(find.text('Membro dal 15 gennaio 2026'), findsOneWidget);
       expect(find.text('mario'), findsWidgets);
       expect(find.text('Profilo salvato.'), findsNothing);
+    });
+
+    testWidgets('su schermo largo il profilo si legge', (tester) async {
+      // Il test che mancava: a 1200px scatta il ramo a due colonne, che metteva
+      // due `Expanded` dentro una colonna dentro uno scroll. Flutter non sapeva
+      // quanto spazio assegnare e la schermata intera restava nera.
+      await pumpScreen(
+        tester,
+        const ProfileScreen(),
+        surface: const Size(1200, 900),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Membro dal 15 gennaio 2026'), findsOneWidget);
+
+      // Le due colonne sono davvero affiancate: banner e campi partono da x
+      // diverse. In una colonna sola avrebbero la stessa x, quindi il confronto
+      // distingue i due layout senza dire quale dei due sia a sinistra.
+      final banner = tester.getTopLeft(find.byType(ProfileAvatar));
+      final campo = tester.getTopLeft(find.byType(TextFormField).first);
+      expect(
+        campo.dx,
+        isNot(equals(banner.dx)),
+        reason: 'banner e campi sono affiancati, non impilati',
+      );
     });
 
     testWidgets('il logout chiama il repository auth', (tester) async {
@@ -361,14 +403,31 @@ void main() {
       expect(find.text('Notifiche push'), findsOneWidget);
       expect(find.text('Nuove votazioni'), findsOneWidget);
       expect(find.text('Amici'), findsOneWidget);
+      expect(find.text('Consigli'), findsOneWidget);
       expect(find.text('Tornei'), findsOneWidget);
       expect(find.text('Cambiamenti di classifica'), findsOneWidget);
+    });
+
+    testWidgets('l interruttore Consigli salva la preferenza', (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.text('Consigli'));
+      await tester.pumpAndSettle();
+
+      expect(repo.saveNotificationsCalls, 1);
+      expect(repo.preferences.recommendations, isFalse);
+      // Le voci del gruppo restano accese: e' una preferenza sola.
+      expect(repo.preferences.friends, isTrue);
     });
 
     testWidgets('un interruttore salva la preferenza', (tester) async {
       await pumpSettings(tester);
 
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Tornei'));
+      // La voce sta in fondo alla lista: su una superficie di test di 800x600
+      // non e' visibile, e un tocco fuori dallo schermo non arriverebbe.
+      await tester.ensureVisible(find.text('Tornei'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tornei'));
       await tester.pumpAndSettle();
 
       expect(repo.saveNotificationsCalls, 1);
@@ -382,27 +441,79 @@ void main() {
         ..saveFailure = const ProfileFailure('Preferenze non salvate.');
       await pumpSettings(tester, repositoryFailing: failing);
 
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Tornei'));
+      await tester.ensureVisible(find.text('Tornei'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tornei'));
       await tester.pumpAndSettle();
 
+      // L'avviso compare in cima alla lista, che dopo lo scorrimento e' fuori
+      // schermo e non montata: va riportata in vista prima di cercarla.
+      await tester.scrollUntilVisible(
+        find.text('Preferenze non salvate.'),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Preferenze non salvate.'), findsOneWidget);
     });
 
     testWidgets('con tutte le spunte spente compare l avviso', (tester) async {
       await pumpSettings(tester);
 
-      for (final label in [
-        'Notifiche push',
-        'Nuove votazioni',
-        'Amici',
-        'Tornei',
-        'Cambiamenti di classifica',
-      ]) {
-        await tester.tap(find.widgetWithText(SwitchListTile, label));
-        await tester.pumpAndSettle();
-      }
+      // La via corta e' la modalita' "Nessuna": e' la stessa fine del
+      // percorso a cinque tocchi, ma e' quello che l'utente sceglie davvero.
+      await tester.tap(find.text('Nessuna'));
+      await tester.pumpAndSettle();
 
-      expect(find.text('Tutte le notifiche sono spente.'), findsOneWidget);
+      expect(repo.preferences.allOff, isTrue);
+
+      // L'avviso sta in fondo alla lista, quindi va fatto scorrere: su una
+      // superficie di test di 800x600 non verrebbe costruito e il test
+      // passerebbe anche senza avviso.
+      await tester.scrollUntilVisible(
+        find.text('Non riceverai piu\' nulla. Puoi cambiare idea quando vuoi.'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        find.text('Non riceverai piu\' nulla. Puoi cambiare idea quando vuoi.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('la modalita\' solo importanti spegne le voci rumorose',
+        (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.text('Solo importanti'));
+      await tester.pumpAndSettle();
+
+      // Restano accese quelle che non arrivano a raffica.
+      expect(repo.preferences.push, isTrue);
+      expect(repo.preferences.friends, isTrue);
+      expect(repo.preferences.votes, isFalse);
+      expect(repo.preferences.tournaments, isFalse);
+      expect(repo.preferences.rankChanges, isFalse);
+    });
+
+    testWidgets('in una modalita\' fissa le spunte non si possono muovere',
+        (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.text('Nessuna'));
+      await tester.pumpAndSettle();
+      final callsDopoLaModalita = repo.saveNotificationsCalls;
+
+      // Le righe ci sono ancora e si possono toccare, ma non cambiano niente:
+      // altrimenti l'utente cambierebbe una voce e la barra continuerebbe a
+      // dichiarare una modalita' che non e' piu' vera.
+      await tester.tap(find.text('Tornei'));
+      await tester.pumpAndSettle();
+
+      expect(repo.saveNotificationsCalls, callsDopoLaModalita);
+      expect(
+        find.textContaining('Stai in una modalita\' fissa'),
+        findsOneWidget,
+      );
     });
   });
 

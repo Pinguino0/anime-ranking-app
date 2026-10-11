@@ -175,6 +175,7 @@ class CachedRankingRepository implements RankingRepository, ProvidesCacheStatus 
         'rank_position': row.position,
         'anime_id': row.animeId,
         'title': row.title,
+        'title_it': row.italianTitle,
         'japanese_title': row.japaneseTitle,
         'image_url': row.imageUrl,
         'episodes': row.episodes,

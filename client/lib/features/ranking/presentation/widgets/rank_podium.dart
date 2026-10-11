@@ -254,15 +254,12 @@ class _PodiumColumn extends StatelessWidget {
 
     return ArPressable(
       onTap: entry.onTap,
-      child: Hero(
-        tag: entry.heroTag ?? 'podium-${entry.position}',
-        // Il volo parte dal riquadro della copertina e arriva al poster della
-        // scheda. Senza uno shuttle il widget viene ritagliato ai bordi del
-        // contenitore, e l'immagine sembra "staccata" a meta' percorso.
-        flightShuttleBuilder: (_, animation, _, from, to) =>
-            ScaleTransition(scale: animation, child: from.widget),
-        child: column,
-      ),
+      // Il podio e' decorativo: il tap apre la scheda e basta. Non mette
+      // l'Hero perche' la stessa rotta mostra anche la tabella del ranking, che
+      // invece lo mette, e un anime presente in entrambe avrebbe due Hero con
+      // lo stesso tag. Il tag del podio era anche gia' ambiguo: con
+      // `heroTag` non nullo il fallback `podium-<posizione>` non entrava mai.
+      child: column,
     );
   }
 }

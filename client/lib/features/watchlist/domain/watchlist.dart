@@ -42,20 +42,27 @@ enum WatchStatus {
       );
 }
 
-/// Una riga di `watchlists` con i dati dell anime gia' uniti.
+/// Una riga di watchlist con i dati dell anime gia' uniti.
 ///
-/// Il join e' fatto da PostgREST (`anime:anime_id (...)`) perche' l anime non ha
-/// una tabella di watchlist dedicata: la lista si legge tutta da una richiesta,
+/// Vale sia per la watchlist personale (`personal_watchlist`, senza gruppo) sia
+/// per quella condivisa di un gruppo (`watchlists`). Il join con l anime e'
+/// fatto da PostgREST (`anime:anime_id (...)`) perche' l anime non ha una
+/// tabella di watchlist dedicata: la lista si legge tutta da una richiesta,
 /// senza una seconda chiamata per arricchirla.
 class WatchlistEntry {
   const WatchlistEntry({
     required this.id,
-    required this.groupId,
+    this.groupId,
     required this.animeId,
     required this.status,
     this.currentEpisode = 0,
     this.isFavorite = false,
+    this.userId,
+    this.userName,
+    this.message,
+    this.isMine = false,
     this.title = 'Senza titolo',
+    this.italianTitle,
     this.imageUrl,
     this.episodes,
     this.year,
@@ -65,13 +72,37 @@ class WatchlistEntry {
   });
 
   final String id;
-  final String groupId;
+  /// Gruppo della voce; `null` quando la voce e' nella watchlist personale.
+  final String? groupId;
+
   final String animeId;
+
+  /// Chi ha messo l'anime nella lista. Nella watchlist di un gruppo serve a
+  /// mostrare "consigliato da" seguito dal nome; nella lista personale e' l'utente stesso.
+  final String? userId;
+  final String? userName;
+
+  /// Messaggio lasciato con il consiglio (lista di gruppo), `null` se assente.
+  final String? message;
+
+  /// true se la voce e' dell'utente collegato.
+  ///
+  /// Lo decide il repository confrontando `user_id` con la sessione: cosi' la
+  /// schermata di gruppo sa quali voci puo' modificare senza interrogare
+  /// l'autenticazione per ogni riga. Vale sempre `true` per la lista personale.
+  final bool isMine;
   final WatchStatus status;
   final int currentEpisode;
   final bool isFavorite;
   final String title;
+
+  /// Titolo italiano, se il catalogo lo conosce. La UI usa [displayTitle].
+  final String? italianTitle;
   final String? imageUrl;
+
+  /// Titolo mostrato all'utente: italiano se disponibile, altrimenti il titolo
+  /// del catalogo.
+  String get displayTitle => italianTitle ?? title;
 
   /// Episodi totali, quando il catalogo li conosce.
   ///
@@ -117,27 +148,31 @@ class WatchlistEntry {
     return parts.join(' · ');
   }
 
-  factory WatchlistEntry.parse(Map<String, dynamic> json) {
+  factory WatchlistEntry.parse(Map<String, dynamic> json, {String? mineId}) {
     // Il join su una chiave esterna arriva come oggetto, ma una versione
     // della libreria puo' consegnarlo come lista di un elemento: senza questa
     // difesa l anime mostrerebbe "Senza titolo" e nessun avviso.
-    final anime = switch (json['anime']) {
-      final Map<Object?, Object?> map => Map<String, dynamic>.from(map),
-      final List<Object?> list when list.isNotEmpty && list.first is Map =>
-        Map<String, dynamic>.from(list.first as Map),
-      _ => const <String, dynamic>{},
-    };
+    final anime = _joinedMap(json['anime']);
+    // `profile:user_id (username)` per sapere chi ha messo l'anime in lista.
+    final profile = _joinedMap(json['profile']);
 
     final animeId = _text(json['anime_id']) ?? '';
+    final userId = _text(json['user_id']);
 
     return WatchlistEntry(
       id: _text(json['id']) ?? animeId,
-      groupId: _text(json['group_id']) ?? '',
+      // `null` nella watchlist personale, dove `group_id` non esiste proprio.
+      groupId: _text(json['group_id']),
       animeId: animeId,
       status: WatchStatus.fromWire(_text(json['status'])),
       currentEpisode: _toInt(json['current_episode']) ?? 0,
       isFavorite: json['is_favorite'] == true,
+      userId: userId,
+      userName: _text(profile['username']),
+      message: _text(json['message']),
+      isMine: userId != null && userId == mineId,
       title: anime['title'] as String? ?? 'Senza titolo',
+      italianTitle: anime['title_it'] as String?,
       imageUrl: anime['image_url'] as String?,
       episodes: _toInt(anime['episodes']),
       year: _toInt(anime['year']),
@@ -159,7 +194,12 @@ class WatchlistEntry {
         status: status ?? this.status,
         currentEpisode: currentEpisode ?? this.currentEpisode,
         isFavorite: isFavorite ?? this.isFavorite,
+        userId: userId,
+        userName: userName,
+        message: message,
+        isMine: isMine,
         title: title,
+        italianTitle: italianTitle,
         imageUrl: imageUrl,
         episodes: episodes,
         year: year,
@@ -173,6 +213,56 @@ class WatchlistEntry {
 
   @override
   int get hashCode => animeId.hashCode;
+}
+
+/// Un consiglio di visione registrato in `anime_recommendations`.
+///
+/// `toUserId`/`toUserName` sono `null` quando il consiglio era "a tutti i
+/// membri del gruppo".
+class AnimeRecommendation {
+  const AnimeRecommendation({
+    required this.id,
+    required this.groupId,
+    required this.animeId,
+    required this.fromUserId,
+    required this.fromUserName,
+    this.toUserId,
+    this.toUserName,
+    this.message,
+    this.createdAt,
+  });
+
+  final String id;
+  final String groupId;
+  final String animeId;
+  final String fromUserId;
+  final String fromUserName;
+
+  /// Destinatario; `null` per un consiglio "a tutti".
+  final String? toUserId;
+  final String? toUserName;
+
+  final String? message;
+  final DateTime? createdAt;
+
+  bool get forEveryone => toUserId == null;
+
+  factory AnimeRecommendation.parse(Map<String, dynamic> json) {
+    final from = _joinedMap(json['from_profile']);
+    final to = _joinedMap(json['to_profile']);
+
+    return AnimeRecommendation(
+      id: _text(json['id']) ?? '',
+      groupId: _text(json['group_id']) ?? '',
+      animeId: _text(json['anime_id']) ?? '',
+      fromUserId: _text(json['from_user_id']) ?? '',
+      fromUserName: _text(from['username']) ?? '',
+      toUserId: _text(json['to_user_id']),
+      toUserName: _text(to['username']),
+      message: _text(json['message']),
+      createdAt: DateTime.tryParse('${json['created_at']}'),
+    );
+  }
 }
 
 /// Totali della watchlist, da `personal_stats`.
@@ -305,4 +395,15 @@ String? _text(Object? raw) => switch (raw) {
 List<String> _strings(Object? raw) => switch (raw) {
       final List<Object?> list => [for (final e in list) if (e is String) e],
       _ => const [],
+    };
+
+/// Normalizza un join PostgREST in una mappa.
+///
+/// Una chiave esterna arriva come oggetto, ma alcune versioni della libreria
+/// la consegnano come lista di un elemento.
+Map<String, dynamic> _joinedMap(Object? raw) => switch (raw) {
+      final Map<Object?, Object?> map => Map<String, dynamic>.from(map),
+      final List<Object?> list when list.isNotEmpty && list.first is Map =>
+        Map<String, dynamic>.from(list.first as Map),
+      _ => const <String, dynamic>{},
     };

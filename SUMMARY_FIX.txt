@@ -1,0 +1,10 @@
+﻿Ricevuto feedback Gemini e Claude:
+
+- AnimeWorld è OK: extractor/test /extract restituiscono 200 (AOT + Re:Zero S3/S4 ita/sub)
+- Tunnel quick cambia URL → aggiornare GENERIC_PROVIDER_ENDPOINT su Supabase secrets
+- Endpoint /resolve non esiste nell'extractor (usa /extract) - verifica mapping EF->extractor
+- Placeholder AU (-x) da pulire
+- Migliorare error reporting (timeout vs upstream error)
+
+Strumenti pronti: builds (APK/AAB/Win), mapping AW completato, file diagnostici.
+Pronti per fix EF/secrets + cleanup DB.

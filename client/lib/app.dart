@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/screens/setup_screen.dart';
+import 'features/update/presentation/widgets/update_gate.dart';
 
 /// Radice dell'app.
 ///
@@ -25,6 +26,15 @@ class AnimeRankApp extends ConsumerWidget {
       darkTheme: AppTheme.dark,
       theme: AppTheme.light,
       routerConfig: ref.watch(appRouterProvider),
+      // Il `builder` copre tutte le schermate, login e registrazione comprese.
+      // Il controllo versione parte prima di sapere chi ha effettuato
+      // l'accesso, quindi un utente non ancora entrato deve vedere l'avviso
+      // esattamente come chi e' gia' dentro. Se l'avviso stesse dentro una
+      // rotta, chi non ha ancora fatto il login non lo vedrebbe mai: e'
+      // proprio chi ha piu' rischio di restare indietro.
+      builder: (context, child) => UpdateGate(
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
   }
 }

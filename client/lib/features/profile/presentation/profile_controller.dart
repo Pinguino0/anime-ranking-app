@@ -64,6 +64,7 @@ class NotificationPreferencesController extends AsyncNotifier<NotificationPrefer
     bool? friends,
     bool? tournaments,
     bool? rankChanges,
+    bool? recommendations,
   }) async {
     final current = state.value;
     if (current == null) return;
@@ -74,6 +75,7 @@ class NotificationPreferencesController extends AsyncNotifier<NotificationPrefer
       friends: friends,
       tournaments: tournaments,
       rankChanges: rankChanges,
+      recommendations: recommendations,
     );
 
     // Aggiornamento ottimistico: un interruttore che scatta e torna indietro

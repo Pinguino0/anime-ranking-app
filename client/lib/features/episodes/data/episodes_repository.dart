@@ -1,6 +1,25 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
+import 'animeunity_extractor.dart';
+
+/// Una risoluzione richiesta e non riuscita.
+///
+/// Vale solo per le fonti che hanno un [EpisodeSource.canonicalUrl], e serve a
+/// distinguere il caso in cui il player deve passare alla fonte successiva
+/// ("questa non si risolve") dal caso in cui deve mostrare un errore ("il
+/// servizio non c'e'"). Sono due cose diverse per l'utente: la prima si
+/// risolve da sola, la seconda no.
+class SourceResolutionFailure implements Exception {
+  const SourceResolutionFailure(this.message, {this.isRetryable = true});
+
+  final String message;
+  final bool isRetryable;
+
+  @override
+  String toString() => message;
+}
 
 /// Operazioni su episodi, fonti e progresso di visione.
 ///
@@ -14,6 +33,16 @@ abstract interface class EpisodesRepository {
 
   /// Fonti attive di un episodio, dalla piu' alta qualita' in giu'.
   Future<List<EpisodeSource>> sources(String episodeId);
+
+  /// Trasforma l'indirizzo canonico di una fonte in un URL riproducibile.
+  ///
+  /// Va chiamata al momento della riproduzione e non prima: il risultato porta
+  /// una scadenza e vale per una richiesta sola, quindi risolvere tutto
+  /// all'apertura della schermata farebbe consumare i token dei provider senza
+  /// che nessuno li usi. Per le fonti che hanno gia' un indirizzo
+  /// riproducibile non serve chiamarla, e quando serve restituisce
+  /// [SourceResolutionFailure] invece di un URL inventato.
+  Future<ResolvedSource> resolveSource(String sourceId);
 
   /// Registra il voto su un episodio. `null` lo cancella.
   Future<double?> rate(String episodeId, double? score);
@@ -30,9 +59,14 @@ abstract interface class EpisodesRepository {
 }
 
 class SupabaseEpisodesRepository implements EpisodesRepository {
-  SupabaseEpisodesRepository(this._client);
+  SupabaseEpisodesRepository(this._client, {ClientSourceExtractor? clientExtractor})
+      : _clientExtractor = clientExtractor ?? AnimeUnityExtractor();
 
   final SupabaseClient _client;
+
+  /// Chi risolve le fonti che il backend non puo' (AnimeUnity, dietro
+  /// Cloudflare). Iniettabile perche' i test non devono toccare la rete.
+  final ClientSourceExtractor _clientExtractor;
 
   /// Id dell'utente collegato.
   ///
@@ -58,7 +92,6 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
         'episodes_for_anime',
         params: {'_anime_id': animeId},
       );
-
       return [
         for (final row in _rows(rows))
           Episode.parse(_map(row)),
@@ -93,6 +126,106 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
         'Fonti di visione non disponibili. Riprova.',
         isRetryable: true,
       );
+    }
+  }
+
+  @override
+  Future<ResolvedSource> resolveSource(String sourceId) async {
+    // Il client manda solo l'id. L'indirizzo canonico e' riletto dal backend,
+    // perche' se arrivasse da qui la funzione sarebbe un proxy aperto per
+    // qualunque URL e non un resolver di fonti del catalogo: chi chiama
+    // potrebbe scegliere *quale* fonte risolvere, non *cosa* risolvere.
+    try {
+      final response = await _client.functions.invoke(
+        AppConfig.sourceResolverFunction,
+        // `client_extract` dice alla funzione che questa versione dell'app sa
+        // risolvere da sola le fonti che il datacenter non puo' (AnimeUnity).
+        // Le versioni vecchie non lo mandano e ricevono la risposta di sempre:
+        // e' l'unico modo per cambiare forma a una risposta senza rompere chi
+        // non e' ancora aggiornato.
+        body: {'source_id': sourceId, 'client_extract': true},
+      );
+
+      final data = response.data;
+      if (data is! Map) {
+        throw const SourceResolutionFailure(
+          'Il resolver ha risposto in modo inatteso.',
+        );
+      }
+
+      final row = Map<String, dynamic>.from(response.data as Map);
+
+      // Il backend non puo' risolvere questa fonte (sta dietro Cloudflare) e ha
+      // rimandato indietro l'indirizzo canonico perche' la risolva l'app, che
+      // ha l'IP residenziale dell'utente. Non e' un errore: e' la risposta
+      // giusta per queste fonti.
+      if (row['resolution'] == 'client') {
+        return await _extractOnDevice(sourceId, row);
+      }
+
+      final resolved = ResolvedSource.parse(row);
+
+      if (resolved.resolvedUrl.isEmpty) {
+        // Una risposta 200 senza URL non e' un successo: e' un resolver che ha
+        // accettato la richiesta e non ha fatto niente. Dare inoltre al player un
+        // URL vuoto produrrebbe un errore di rete che parla di DNS, e la causa
+        // vera e' qui.
+        throw const SourceResolutionFailure('Il resolver non ha restituito un link.');
+      }
+
+      return resolved;
+    } on SourceResolutionFailure {
+      rethrow;
+    } on FunctionException catch (e) {
+      throw _translateResolution(e);
+    } catch (_) {
+      throw const SourceResolutionFailure(
+        'Risoluzione non riuscita. Riprova.',
+      );
+    }
+  }
+
+  /// Risolve sul telefono una fonte che il backend ha dichiarato non risolvibile.
+  ///
+  /// La risposta del backend porta solo l'indirizzo canonico e i metadati: il
+  /// link effimero lo produce questa estrazione, sul dispositivo, dove Cloudflare
+  /// vede l'IP dell'utente invece di quello di un datacenter.
+  Future<ResolvedSource> _extractOnDevice(
+    String sourceId,
+    Map<String, dynamic> row,
+  ) async {
+    final canonicalUrl = _value(row['canonical_url']);
+    if (canonicalUrl == null) {
+      throw const SourceResolutionFailure(
+          'La fonte non ha un indirizzo da risolvere.');
+    }
+
+    final rawEpisode = row['episode_number'];
+    final episodeNumber = rawEpisode is int
+        ? rawEpisode
+        : rawEpisode is num
+            ? rawEpisode.toInt()
+            : int.tryParse('$rawEpisode');
+
+    if (episodeNumber == null || episodeNumber < 1) {
+      throw const SourceResolutionFailure(
+          'Numero episodio mancante per questa fonte.');
+    }
+
+    final quality = _value(row['quality']);
+    final provider = row['provider'];
+    final providerSlug = provider is Map ? _value(provider['slug']) : null;
+
+    try {
+      return await _clientExtractor.extract(
+        sourceId: sourceId,
+        canonicalUrl: canonicalUrl,
+        episodeNumber: episodeNumber,
+        quality: quality,
+        providerSlug: providerSlug,
+      );
+    } on ClientExtractionFailure catch (e) {
+      throw SourceResolutionFailure(e.message, isRetryable: e.isRetryable);
     }
   }
 
@@ -197,6 +330,17 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
   Map<String, dynamic> _map(Object? row) =>
       row is Map ? Map<String, dynamic>.from(row) : const <String, dynamic>{};
 
+  /// Una stringa non vuota, altrimenti `null`.
+  ///
+  /// Il corpo della risposta e' JSON non tipato: un campo mancante arriva come
+  /// `null` e uno vuoto come `''`, e in entrambi i casi il chiamante vuole
+  /// `null` invece di una stringa che poi fallisce piu' avanti.
+  String? _value(Object? value) {
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
   /// Traduce un errore di PostgREST in qualcosa che si puo' mostrare.
   EpisodesFailure _translate(PostgrestException e) {
     const passthrough = {
@@ -225,5 +369,99 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
       'Operazione non riuscita. Riprova.',
       isRetryable: true,
     );
+  }
+
+  /// Traduce un errore della Edge Function in qualcosa di dicibile.
+  ///
+  /// La funzione gia' manda messaggi scritti per l'utente, quindi si passa
+  /// attraverso quelli invece di rimetterli in "operazione non riuscita":
+  /// sostituire "questa fonte non e' attiva" con un generico farebbe sembrare
+  /// che il problema sia la rete.
+  ///
+  /// Il codice di stato serve pero' a una cosa: distinguere il tentativo
+  /// ancora sensato dal caso in cui il resolver non esiste proprio. Senza, un
+  /// "Questo provider non e' ancora supportato" — che non si risolve riprovando
+  /// — diventerebbe indistinguibile da un errore di rete passeggero.
+  SourceResolutionFailure _translateResolution(FunctionException e) {
+    final status = e.status;
+    final serverMessage = _serverMessage(e);
+
+    // Status 0: la richiesta non e' nemmeno arrivata. Il pacchetto solleva
+    // `FunctionsFetchException` in questo caso, e non c'e' risposta da
+    // interpretare: il messaggio del client HTTP ("Failed host lookup")
+    // dice piu' del nulla, ma non e' roba dell'utente.
+    if (status == 0) {
+      return const SourceResolutionFailure('Risoluzione non riuscita. Riprova.');
+    }
+
+    // 401 e 403 non sono ripetibili: il token e' scaduto o non c'e'. Riprovare
+    // darebbe lo stesso risultato e l'utente aspetterebbe invano.
+    if (status == 401 || status == 403) {
+      return const SourceResolutionFailure(
+        'Sessione scaduta. Rientra e riprova.',
+        isRetryable: false,
+      );
+    }
+
+    // 404: la fonte non c'e' piu'. Non ripetibile — riprovare non la fa
+    // ricomparire.
+    if (status == 404) {
+      return SourceResolutionFailure(
+        serverMessage ?? 'Questa fonte non e\' piu\' disponibile.',
+        isRetryable: false,
+      );
+    }
+
+    // 501: manca l'adapter del provider. Non e' un errore, e' una cosa non
+    // finita. Dirlo evita che l'utente provi tre volte una fonte che non puo'
+    // funzionare.
+    if (status == 501) {
+      return SourceResolutionFailure(
+        serverMessage ?? 'Questo provider non e\' ancora supportato.',
+        isRetryable: false,
+      );
+    }
+
+    // 400 e 422 sono richieste sbagliate: riformularle non le cambia.
+    if (status >= 400 && status < 500) {
+      return SourceResolutionFailure(
+        serverMessage ?? 'Questa fonte non si puo\' risolvere.',
+        isRetryable: false,
+      );
+    }
+
+    // 5xx: qui il tentativo ha senso, e il fallback automatico verso la
+    // fonte successiva e' la risposta giusta invece di mostrare un errore.
+    return SourceResolutionFailure(
+      serverMessage ?? 'Risoluzione non riuscita. Riprova.',
+    );
+  }
+
+  /// Il messaggio del server, se c'era, altrimenti `null`.
+  ///
+  /// Va cercato dentro `details`, non dentro il messaggio dell'eccezione:
+  /// quello di `supabase_flutter` descrive lo stato HTTP ("400") e non dice
+  /// niente del motivo, mentre il corpo della risposta e' l'unico posto dove la
+  /// Edge Function ha scritto cosa e' andato storto.
+  String? _serverMessage(FunctionException e) {
+    final details = e.details;
+    String? text;
+
+    if (details is String) {
+      text = details;
+    } else if (details is Map) {
+      final message = details['error'];
+      if (message is String) text = message;
+    }
+
+    final trimmed = text?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+
+    // Il corpo della risposta e' testo non fidato. Non finisce in un widget
+    // come messaggio di errore se c'e' dentro HTML, altrimenti un provider
+    // potrebbe far comparire un messaggio che sembra dell'app.
+    if (trimmed.contains('<') || trimmed.length > 200) return null;
+
+    return trimmed;
   }
 }

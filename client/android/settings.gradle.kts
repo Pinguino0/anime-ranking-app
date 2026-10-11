@@ -21,6 +21,10 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "9.1.0" apply false
     id("org.jetbrains.kotlin.android") version "2.4.0" apply false
+    // Legge `google-services.json` e genera le risorse Firebase (project id,
+    // API key) che `Firebase.initializeApp()` usa su Android. Dichiarato qui e
+    // applicato in `app/build.gradle.kts`, come vuole Flutter.
+    id("com.google.gms.google-services") version "4.5.0" apply false
 }
 
 include(":app")

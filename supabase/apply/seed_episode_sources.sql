@@ -1,0 +1,156 @@
+-- ============================================================================
+--  Le sorgenti degli episodi: dove le metti.
+-- ============================================================================
+--
+--  Supabase -> SQL Editor -> New query -> incolla -> Run.
+--
+--  Non serve toccare `episodes`: gli episodi li crea la ricerca online
+--  dall'app. Tu aggiungi solo le SORGENTI, cioe' da dove si vede il video.
+--
+--  Con la migration 028 le fonti possono essere:
+--    - DIRETTE: hanno `source_url` (mp4/hls/iframe) e l'app le apre subito
+--    - CANONICHE: hanno `canonical_url` + `provider_id` e l'app chiama la
+--                 Edge Function `resolve-source` per ottenere un URL effimero
+--
+--  Il resolver manda gli header giusti, quindi una fonte canonica con il
+--  provider `mock` funziona subito senza toccare nulla di reale.
+--
+-- ---------------------------------------------------------------------------
+--  COME LEGARE LE TABELLE
+-- ---------------------------------------------------------------------------
+--
+--    anime  (350 righe, gia' pronte)
+--      id  uuid  <-- questo
+--      external_id  (il MAL id, es. 16498)
+--         |
+--         |  episodes.anime_id -> anime.id
+--         v
+--    episodes
+--      id  uuid  <-- questo
+--      episode_num  (1, 2, 3...)
+--         |
+--         |  episode_sources.episode_id -> episodes.id
+--         v
+--    episode_sources        <-- QUI
+--
+--  Non scrivi mai gli id a mano: li chiedi al database con una SELECT.
+--
+-- ---------------------------------------------------------------------------
+--  COLONNE UTILI
+-- ---------------------------------------------------------------------------
+--
+--    episode_id    uuid    OBBLIGATORIO
+--    source_url    text    Facoltativo per fonti canoniche (altrimenti mp4/hls/iframe)
+--    canonical_url text    Facoltativo per fonti dirette (la pagina del provider)
+--    provider_id   uuid    Facoltativo; se presente, la funzione risolve
+--    source_type   public.episode_source_type  OBBLIGATORIO (mp4 | hls | iframe)
+--    quality       varchar(10)
+--    language      varchar(10)
+--    is_active     boolean default true
+--
+--  `episode_sources_list()` ora restituisce anche `canonical_url`,
+--  `provider_slug` e `provider_label`. L'app prova in ordine e, se c'e'
+--  `canonical_url`, chiama `resolve-source` prima di aprire il player.
+--
+-- ---------------------------------------------------------------------------
+--  VALORI
+-- ---------------------------------------------------------------------------
+--
+--    source_type: mp4 | hls | iframe
+--      - mp4/hls: l'app li riproduce da sola (preferirli)
+--      - iframe:   si apre fuori dall'app
+--
+--    language: 'ita' audio italiano -> "ITA"; 'sub' sottotitolato -> "SUB";
+--              'dub' -> "DUB"; 'eng' -> "ENG"; 'jpn' -> "JPN"
+--
+-- ---------------------------------------------------------------------------
+--  ESEMPIO A: FONTE DIRETTA (nessuna risoluzione)
+-- ---------------------------------------------------------------------------
+--
+-- insert into public.episode_sources
+--   (episode_id, source_url, source_type, quality, language)
+-- select e.id, 'https://esempio.com/ep1-1080p.m3u8', 'hls', '1080p', 'sub'
+-- from public.episodes e
+-- join public.anime a on a.id = e.anime_id
+-- where a.external_id = 16498 and e.episode_num = 1;
+--
+-- ---------------------------------------------------------------------------
+--  ESEMPIO B: FONTE CANONICA CON PROVIDER MOCK (richiede resolve-source)
+-- ---------------------------------------------------------------------------
+--
+-- Ottieni l'id del provider mock:
+--   select id, slug, label from public.providers where slug = 'mock';
+--
+-- Poi inserisci una fonte che punta alla pagina canonica. Il mock prenderà
+-- l'ultimo segmento dell'URL come watch id.
+--
+-- insert into public.episode_sources
+--   (episode_id, canonical_url, provider_id, source_type, quality, language)
+-- select e.id,
+--        'https://api.example.com/watch/ep1',
+--        (select id from public.providers where slug = 'mock'),
+--        'hls',
+--        '1080p',
+--        'sub'
+-- from public.episodes e
+-- join public.anime a on a.id = e.anime_id
+-- where a.external_id = 16498 and e.episode_num = 1;
+--
+-- ---------------------------------------------------------------------------
+--  ESEMPIO PRONTO: episodio 1 di Shingeki no Kyojin
+-- ---------------------------------------------------------------------------
+--  Due strade: diretta (video pubblico MDN) e/o canonica (mock).
+--  Commenta quella che non ti serve.
+--
+--  1) Diretta hls/mp4 di prova:
+--
+-- insert into public.episode_sources
+--   (episode_id, source_url, source_type, quality, language)
+-- select e.id, v.url, v.tipo, v.qualita, v.lingua
+-- from public.episodes e
+-- join public.anime a on a.id = e.anime_id
+-- cross join (values
+--     ('https://interactive-examples.mdn.mozilla.net/media/cc0-video', 'hls', '1080p', 'sub'),
+--     ('https://interactive-examples.mdn.mozilla.net/media/cc0-video', 'mp4', '720p',  'ita')
+--   ) as v(url, tipo, qualita, lingua)
+-- where a.external_id = 16498 and e.episode_num = 1
+--   and not exists (
+--     select 1 from public.episode_sources s
+--      where s.episode_id = e.id
+--        and s.source_url = v.url
+--        and s.quality is not distinct from v.qualita
+--        and s.language is not distinct from v.lingua
+--   );
+--
+--  2) Canonica via provider mock:
+--
+-- insert into public.episode_sources
+--   (episode_id, canonical_url, provider_id, source_type, quality, language)
+-- select e.id,
+--        'https://api.example.com/watch/shingeki-ep1',
+--        (select id from public.providers where slug = 'mock'),
+--        'hls',
+--        '480p',
+--        'dub'
+-- from public.episodes e
+-- join public.anime a on a.id = e.anime_id
+-- where a.external_id = 16498 and e.episode_num = 1
+--   and not exists (
+--     select 1 from public.episode_sources s
+--      where s.episode_id = e.id
+--        and s.canonical_url = 'https://api.example.com/watch/shingeki-ep1'
+--        and s.provider_id = (select id from public.providers where slug = 'mock')
+--   );
+--
+-- ---------------------------------------------------------------------------
+--  VERIFICA
+-- ---------------------------------------------------------------------------
+--
+-- select e.episode_num, s.source_type, s.quality, s.language, s.source_url, s.canonical_url, p.slug, s.is_active
+-- from public.episode_sources s
+-- left join public.providers p on p.id = s.provider_id
+-- join public.episodes e on e.id = s.episode_id
+-- order by e.episode_num, s.created_at;
+--
+-- select * from public.episode_sources_list((select id from public.episodes e join public.anime a on a.id=e.anime_id where a.external_id=16498 and e.episode_num=1));
+-- ============================================================================

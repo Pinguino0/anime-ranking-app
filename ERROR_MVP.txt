@@ -1,0 +1,28 @@
+﻿MVP: Errore "le fonti disponibili non si risolvono riprova più tardi" per anime diversi da Death Note/Attack on Titan
+
+## Contesto
+- App Flutter (Windows/Android buildable)
+- DB Supabase: anime, episodes, episode_sources
+- Provider: mio_provider (da92e844-6560-4038-8431-f609f92b9a21), canonical_url popolato
+- Edge Function resolve-source (v22, verify_jwt false) → generic_api → extractor via Cloudflare tunnel
+- Extractor scraper/server.js con extractAnimeWorld/extractAnimeUnity; tunnel project-meets-biz-adjustments.trycloudflare.com
+
+## Sintomo
+Molti anime oltre Death Note/AOT mostrano "Le fonti disponibili non si risolvono. Riprova più tardi." ma episodi+fonti esistono.
+
+## Ipotesi
+1. Chiamata EF POST /functions/v1/resolve-source fallisce (rete/tunnel down/timeout/CORS)
+2. Extractor non raggiungibile dal tunnel o URL tunnel cambiato
+3. canonical_url formato non gestito dal parser extractor
+4. EF lancia eccezione → tradotta in messaggio generico
+
+## Dati da verificare
+- Stato extractor: processo su porta 3000 + GET /health
+- Tunnel cloudflared attivo + URL corrente vs GENERIC_PROVIDER_ENDPOINT EF
+- Test EF diretto con source_id reale (Re:Zero S3 ep1)
+- Log EF/Supabase function logs + risposta FunctionException dall'app
+
+## Files
+- client/lib/features/episodes/data/episodes_repository.dart (translateResolution)
+- supabase/functions/resolve-source/index.ts, providers/generic-api.ts
+- scraper/server.js, scraper/animeworld.js, scraper/animeunity.js
