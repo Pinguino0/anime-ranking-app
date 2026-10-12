@@ -11,6 +11,8 @@ import 'core/cache/hive_cache_store.dart';
 import 'core/cache/session_cache_cleanup.dart';
 import 'core/env/app_config.dart';
 import 'core/supabase/supabase_provider.dart';
+import 'features/achievements/data/achievements_repository.dart';
+import 'features/achievements/presentation/achievements_controller.dart';
 import 'features/anime/data/anime_repository.dart';
 import 'features/anime/presentation/anime_controller.dart';
 import 'features/auth/data/auth_repository.dart';
@@ -121,6 +123,9 @@ Future<void> main() async {
       ),
       profileRepositoryProvider.overrideWithValue(
         SupabaseProfileRepository(client),
+      ),
+      achievementsRepositoryProvider.overrideWithValue(
+        SupabaseAchievementsRepository(client),
       ),
       // Il catalogo non va in cache: cambia di continuo, e mostrare una
       // copia vecchia su una ricerca ripeterebbe l'effetto scomodo che la

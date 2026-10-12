@@ -6,6 +6,7 @@ import '../ui/transitions.dart';
 import '../../features/auth/domain/auth_status.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
+import '../../features/achievements/presentation/screens/achievements_screen.dart';
 import '../../features/anime/domain/anime.dart';
 import '../../features/anime/presentation/screens/anime_detail_screen.dart';
 import '../../features/anime/presentation/screens/anime_search_screen.dart';
@@ -110,6 +111,7 @@ class AppRoutes {
 
   static const String profile = '/profile';
   static const String notificationSettings = '/profile/notifications';
+  static const String achievements = '/profile/achievements';
   static const String deleteAccount = '/profile/delete';
 
   /// Costruisce la rotta di un gruppo specifico.
@@ -371,6 +373,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: 'notifications',
                 builder: (context, state) => const NotificationSettingsScreen(),
+              ),
+              GoRoute(
+                path: 'achievements',
+                builder: (context, state) => const AchievementsScreen(),
               ),
               GoRoute(
                 path: 'delete',

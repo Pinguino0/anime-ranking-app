@@ -319,6 +319,16 @@ class _BodyState extends ConsumerState<_Body> {
                 value: 'Push, voti, amici, tornei',
                 onTap: () => context.push('/profile/notifications'),
               ),
+              const Divider(height: 1, indent: ArSpace.md, endIndent: ArSpace.md),
+              _ActionRow(
+                icon: Icons.workspace_premium_outlined,
+                label: 'Obiettivi',
+                // I traguardi si vedono in una pagina propria: sono dodici righe
+                // con una descrizione, e in una riga di impostazioni non ci
+                // starebbero.
+                value: 'Traguardi sbloccati',
+                onTap: () => context.push('/profile/achievements'),
+              ),
             ],
           ),
         ),
