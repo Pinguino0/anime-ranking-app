@@ -81,6 +81,36 @@ class AnimeUnityExtractor implements ClientSourceExtractor {
     String? quality,
     String? providerSlug,
   }) async {
+    try {
+      return await _extract(
+        sourceId: sourceId,
+        canonicalUrl: canonicalUrl,
+        episodeNumber: episodeNumber,
+        quality: quality,
+        providerSlug: providerSlug,
+      );
+    } on ClientExtractionFailure catch (failure) {
+      // Un tentativo andato male puo' lasciare in cache una sessione che il
+      // server ha ormai cominciato a rifiutare (Cloudflare, token scaduto). La
+      // si butta, cosi' il prossimo tentativo — il player ne fa qualche giro,
+      // vedi `_EpisodePlayerState.resolutionTries` — ne compra una nuova invece
+      // di ripetere lo stesso errore. Su un errore non ritentabile non si tocca
+      // nulla: la sessione non c'entra con un episodio inesistente.
+      if (failure.isRetryable) {
+        _session = null;
+        _sessionExpiresAt = null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<ResolvedSource> _extract({
+    required String sourceId,
+    required String canonicalUrl,
+    required int episodeNumber,
+    String? quality,
+    String? providerSlug,
+  }) async {
     final animeId = _parseAnimeId(canonicalUrl);
     if (animeId == null) {
       throw ClientExtractionFailure(

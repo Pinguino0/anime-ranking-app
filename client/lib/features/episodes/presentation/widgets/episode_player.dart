@@ -161,9 +161,9 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
   ///
   /// Serve a due cose: a non spingere due volte la stessa schermata se l'utente
   /// preme il pulsante prima che la rotta si assesti, e a spegnere la superficie
-  /// inline finche' la rotta a tutto schermo e' aperta. `media_kit` disegna un
-  /// solo `Video` per `VideoController`, quindi le due superfici non possono
-  /// essere montate insieme (vedi [build]).
+  /// inline finche' la rotta a tutto schermo e' aperta. Le due superfici
+  /// condividono la texture del controller, ma tenerne una sola viva evita di
+  /// duplicare comandi e timer (vedi [build]).
   bool _fullscreen = false;
 
   /// true quando la WebView o il codec non c'entrano e il caso e' `iframe`.
@@ -194,7 +194,15 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
 
     // Cambiando episodio si riparte: riusare il player precedente mostrerebbe il
     // video del vecchio episodio con il titolo del nuovo.
-    if (oldWidget.sources != widget.sources) {
+    //
+    // Il confronto e' sugli id e non sull'identita' della lista: la schermata
+    // che ospita il player ricrea la lista a ogni build (per portare avanti le
+    // fonti sottotitolate), e un `!=` sulla lista faceva ripartire il video da
+    // capo a ogni ricostruzione. Insieme alla rotazione dello schermo era il bug
+    // del full screen: si ruotava, la schermata si ricostruiva, il player si
+    // riapriva da zero e la rotta a tutto schermo restava a mostrare un
+    // controller gia' chiuso — nero, con l'audio della nuova riproduzione.
+    if (!_sameSources(oldWidget.sources, widget.sources)) {
       _open(widget.sourceIndex ?? 0, resume: false);
       return;
     }
@@ -267,6 +275,15 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
   /// sono il punto in cui si smette di insistere: oltre, quello che sta
   /// fallendo non e' "una fonte morta fra altre valide", e' il backend.
   static const int maxAttempts = 3;
+
+  /// Quante volte si ritenta la stessa risoluzione prima di passare oltre.
+  ///
+  /// Deliberatamente piccolo: ogni tentativo e' una nuova estrazione sul
+  /// dispositivo (piu' richieste al provider), quindi insistere a oltranza
+  /// significherebbe solo far aspettare l'utente davanti allo scheletro. Tre
+  /// coprono il singhiozzo tipico di Cloudflare senza trasformare una fonte
+  /// rotta in un'attesa lunga.
+  static const int resolutionTries = 3;
 
   Future<void> _tryOpen(
     EpisodeSource source, {
@@ -368,10 +385,26 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
       if (source.needsResolution) {
         if (resolver == null) return null;
 
-        final resolved =
-            await resolver(source.id).timeout(EpisodePlayer.resolveTimeout);
+        // La risoluzione lato dispositivo (AnimeUnity) passa da Cloudflare e
+        // ogni tanto risponde 403 o va in timeout: non e' una fonte morta, e' un
+        // singhiozzo di rete. Si ritenta qualche volta prima di dichiararla
+        // persa, ma solo se l'errore dice di essere ritentabile: un episodio che
+        // non esiste non comincia a esistere insistendo.
+        ResolvedSource? resolved;
+        for (var tryIndex = 0; tryIndex < resolutionTries; tryIndex++) {
+          try {
+            resolved = await resolver(source.id)
+                .timeout(EpisodePlayer.resolveTimeout);
+            break;
+          } on SourceResolutionFailure catch (failure) {
+            final last = tryIndex == resolutionTries - 1;
+            if (!failure.isRetryable || last) rethrow;
+            if (!mounted || attempt != _attempt) return null;
+          }
+        }
 
         if (!mounted || attempt != _attempt) return null;
+        if (resolved == null) return null;
 
         setState(() => _resolved = resolved);
         return resolved;
@@ -655,12 +688,9 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
   ///
   /// Non si apre una seconda decodifica: si riusa lo stesso
   /// [mkv.VideoController] e la rotta a tutto schermo monta un `mkv.Video`
-  /// sullo stesso controller. Quello che cambia e' che la superficie inline
-  /// viene spenta prima di spingere la rotta: `media_kit` mostra un solo
-  /// `Video` per controller e tenerne due montati insieme — quello inline sotto
-  /// e quello a tutto schermo sopra — lascia nero quello visibile. Smontando la
-  /// superficie sotto, la rotta a tutto schermo resta l'unica a disegnare il
-  /// video.
+  /// sullo stesso controller: le due superfici condividono la stessa texture,
+  /// quindi non si rubano lo schermo a vicenda. La superficie inline si spegne
+  /// lo stesso, per non tenere due `Video` vivi insieme.
   ///
   /// La rotazione e la barra di sistema vengono impostate prima di spingere la
   /// rotta e ripristinate quando la rotta si chiude, cosi' l'utente esce dallo
@@ -668,17 +698,14 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
   /// bloccato in orizzontale.
   Future<void> _enterFullscreen() async {
     if (_fullscreen) return;
+    if (!_isReady) return;
 
-    final player = _player;
-    final controller = _videoController;
-    if (player == null || controller == null) return;
-
-    final sources = widget.sources;
-    final index = _index;
-
-    // Spegne la superficie inline prima della rotta: e' l'unico modo per non
-    // avere due `Video` sullo stesso controller nello stesso momento.
     setState(() => _fullscreen = true);
+
+    // Cosa ha chiesto l'utente uscendo: oggi solo "prossimo". Il cambio non si
+    // fa mentre la rotta e' aperta, altrimenti resterebbe a disegnare un
+    // controller gia' chiuso.
+    String? action;
     try {
       await SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.landscapeLeft,
@@ -688,8 +715,17 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
 
       if (!mounted) return;
 
-      await Navigator.of(context, rootNavigator: true).push<void>(
-        PageRouteBuilder<void>(
+      // Riletti *dopo* le attese: la rotazione appena chiesta ricostruisce la
+      // schermata sotto e il player potrebbe essere un altro. Usare i
+      // riferimenti vecchi monterebbe la rotta su un controller gia' chiuso:
+      // nero, con l'audio che continua.
+      final player = _player;
+      final controller = _videoController;
+      if (player == null || controller == null) return;
+
+      final index = _index.clamp(0, widget.sources.length - 1);
+      action = await Navigator.of(context, rootNavigator: true).push<String>(
+        PageRouteBuilder<String>(
           opaque: true,
           barrierColor: Colors.black,
           transitionDuration: ArMotion.fast,
@@ -697,10 +733,15 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
           pageBuilder: (_, _, _) => _FullscreenPlayer(
             player: player,
             controller: controller,
-            sourceLabel: sources[index].label,
+            sourceLabel: widget.sources[index].label,
             onTogglePlay: _togglePlay,
             onSeek: _seekTo,
-            onNext: _nextEpisode == null ? null : () => _nextEpisode!(),
+            // "Prossimo" si limita a chiudere la rotta: il cambio di fonte lo
+            // fa chi ha aperto lo schermo intero, appena questa e' sparita.
+            onNext: _nextEpisode == null
+                ? null
+                : () => Navigator.of(context, rootNavigator: true)
+                    .pop(_nextSourceAction),
             onToggleFullscreen: _exitFullscreen,
           ),
         ),
@@ -715,7 +756,19 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
         overlays: SystemUiOverlay.values,
       );
     }
+
+    // La rotta ha chiesto di aprire la fonte successiva: si fa adesso, con lo
+    // schermo intero gia' chiuso.
+    if (action == _nextSourceAction && mounted) {
+      _open(_index + 1, resume: false);
+    }
   }
+
+  /// Cosa puo' chiedere la rotta a tutto schermo quando si chiude.
+  ///
+  /// Una stringa e non un callback: l'unica cosa che la rotta puo' fare e'
+  /// chiudersi, il resto lo decide chi l'ha aperta.
+  static const String _nextSourceAction = 'next';
 
   void _exitFullscreen() {
     Navigator.of(context, rootNavigator: true).maybePop();
@@ -742,8 +795,6 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
                 )
               else if (_isExternal)
                 _ExternalSourceCard(source: widget.sources[_index])
-              else if (_isExternal)
-                _ExternalSourceCard(source: widget.sources[_index])
               else if (_isReady && !_fullscreen)
                 _VideoSurface(
                   player: _player!,
@@ -759,9 +810,9 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
                 )
               else if (_isReady)
                 // A tutto schermo il video lo disegna la rotta dedicata: qui si
-                // lascia solo lo sfondo. Montare anche questa superficie
-                // significherebbe due `Video` sullo stesso controller, e
-                // `media_kit` ne mostra uno solo lasciando nero l'altro.
+                // lascia solo lo sfondo. Tenere viva anche questa superficie
+                // vorrebbe dire due `Video` (e due set di comandi) sullo stesso
+                // controller.
                 const SizedBox.expand()
               else
                 const SkeletonBox(
@@ -785,6 +836,21 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
     if (index + 1 >= widget.sources.length) return null;
     return () => _open(index + 1, resume: false);
   }
+}
+
+/// Stesse fonti, nello stesso ordine, anche se la lista e' un'istanza nuova.
+///
+/// [EpisodeSource] non ha uguaglianza di valore, quindi si confrontano gli id:
+/// due liste con gli stessi id sono la stessa cosa per il player. Trattarle
+/// come diverse lo farebbe ripartire da capo — che e' esattamente quello che non
+/// deve succedere quando il genitore si limita a ridisegnarsi.
+bool _sameSources(List<EpisodeSource> a, List<EpisodeSource> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i].id != b[i].id) return false;
+  }
+  return true;
 }
 
 /// mm:ss, e h:mm:ss solo quando serve davvero.

@@ -381,7 +381,29 @@ class _PlayableState extends State<_Playable> {
   /// Un `sort` sul solo `isSubtitled` non e' stabile in Dart e mescolerebbe le
   /// fonti che condividono l'ordine: qui si costruiscono due liste e si
   /// concatena, cosi' l'ordine relativo del backend resta.
+  ///
+  /// Se l'ordine e' gia' quello giusto si restituisce la lista originale per
+  /// identita'. Ricrearla a ogni build faceva credere al player che le fonti
+  /// fossero cambiate e lo faceva ripartire da capo; nella schermata a tutto
+  /// schermo, dove la rotazione ricostruisce tutto, era il bug del 12/10/2026
+  /// (vedi `_sameSources` in `episode_player.dart`).
   static List<EpisodeSource> _subtitledFirst(List<EpisodeSource> sources) {
+    var ordered = true;
+    var seenDubbed = false;
+
+    for (final source in sources) {
+      if (source.isSubtitled) {
+        if (seenDubbed) {
+          ordered = false;
+          break;
+        }
+      } else {
+        seenDubbed = true;
+      }
+    }
+
+    if (ordered) return sources;
+
     final subtitled = <EpisodeSource>[];
     final dubbed = <EpisodeSource>[];
 

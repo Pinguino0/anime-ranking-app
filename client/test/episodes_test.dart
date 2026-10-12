@@ -383,6 +383,11 @@ void main() {
       final repository = FakeEpisodesRepository();
 
       Future<void> apri() async {
+        // Un'apertura nuova e' uno State nuovo: svuotare l'albero prima
+        // costringe Flutter a ricostruire il player da `initState`. Due
+        // `pumpWidget` di fila senza il reset riuserebbero lo State — e
+        // quindi `didUpdateWidget` — che non e' quello che si vuole qui.
+        await tester.pumpWidget(const SizedBox.shrink());
         await tester.pumpWidget(
           _playerHost(
             sources: [
@@ -406,6 +411,134 @@ void main() {
       // produrrebbe un player che si chiude da solo dopo qualche minuto, senza
       // che nessuno capisca perche'.
       expect(repository.resolutionCalls, 2);
+    });
+
+    testWidgets('le stesse fonti non fanno ripartire il player', (tester) async {
+      // La schermata episodio ricrea la lista a ogni build (per portare avanti
+      // le sottotitolate): se il player la leggesse come un cambio,
+      // ricomincerebbe da capo a ogni ricostruzione. E' quello che succedeva
+      // ruotando lo schermo per il full screen: nero, con l'audio della nuova
+      // riproduzione e il video fermo sulla prima (ormai chiusa).
+      final repository = FakeEpisodesRepository();
+
+      List<EpisodeSource> fonti() => [
+            sourceFixture(
+              id: 'src-canonica',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+          ];
+
+      await tester.pumpWidget(
+        _playerHost(sources: fonti(), resolve: repository.resolveSource),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(repository.resolutionCalls, 1);
+
+      // La schermata si ridisegna e passa una lista nuova con le stesse fonti:
+      // per il player non e' cambiato niente e non deve ripartire.
+      await tester.pumpWidget(
+        _playerHost(
+          sources: fonti(),
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(repository.resolutionCalls, 1);
+    });
+
+    testWidgets('un cambio vero di fonti fa ripartire il player', (tester) async {
+      // Il rovescio del test precedente: se le fonti cambiano davvero, il
+      // player deve riaprire. Serve a non aver "risolto" il full screen
+      // ignorando ogni cambiamento.
+      final repository = FakeEpisodesRepository();
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-uno',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+          ],
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(repository.resolutionCalls, 1);
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-due',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/2',
+            ),
+          ],
+          resolve: repository.resolveSource,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(repository.resolutionCalls, 2);
+    });
+
+    testWidgets('una risoluzione ritentabile viene ritentata', (tester) async {
+      // Cloudflare risponde 403 a tratti: un singhiozzo non deve diventare
+      // "nessuna fonte". L'errore dice di essere ritentabile, quindi si insiste
+      // finche' la risoluzione non riesce o finiscono i tentativi.
+      var chiamate = 0;
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-retry',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+          ],
+          resolve: (sourceId) async {
+            chiamate++;
+            if (chiamate < 3) {
+              throw const SourceResolutionFailure('nope');
+            }
+            return resolvedFor(sourceId);
+          },
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(chiamate, 3);
+    });
+
+    testWidgets('una risoluzione non ritentabile non viene ripetuta',
+        (tester) async {
+      // Un errore che non cambierebbe ripetendo (episodio inesistente,
+      // indirizzo non riconosciuto) non deve far perder tempo all'utente.
+      var chiamate = 0;
+
+      await tester.pumpWidget(
+        _playerHost(
+          sources: [
+            sourceFixture(
+              id: 'src-morta',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+          ],
+          resolve: (sourceId) async {
+            chiamate++;
+            throw const SourceResolutionFailure('nope', isRetryable: false);
+          },
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(chiamate, 1);
     });
   });
 
