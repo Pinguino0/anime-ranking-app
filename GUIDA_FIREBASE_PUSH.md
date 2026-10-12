@@ -68,7 +68,7 @@ Il **push è completo: server e client**. Non devi fare più niente in Firebase.
   e `20261011190000_device_token_rpc.sql` **applicate**.
 - **Edge Function `send-push`** — deployata, `health` risponde **`ok`**
   (`serviceAccount: true`, `webhookSecret: true`, progetto `animerank-4b0e2`).
-  12 test Deno verdi → **14** con il limite giornaliero.
+  12 test Deno verdi → **17** (limite giornaliero + regressione sull'invio).
 - **Segreti caricati** — `FIREBASE_SERVICE_ACCOUNT` (dal tuo JSON) e
   `PUSH_WEBHOOK_SECRET`.
 - **Collaudo end-to-end** — inserita una notifica di prova con un token finto:

@@ -28,6 +28,7 @@ import {
   parseServiceAccount,
   pemToPkcs8,
   readNotification,
+  reservePushSlot,
 } from './index.ts'
 
 Deno.test('readNotification legge il record del webhook di Supabase', () => {
@@ -193,4 +194,40 @@ Deno.test('parseDailyLimit accetta un limite valido, zero compreso', () => {
   assertEquals(parseDailyLimit(' 5 '), 5)
   // 0 e' un valore legittimo: nessuna push al giorno.
   assertEquals(parseDailyLimit('0'), 0)
+})
+
+/** Un client finto: solo la `rpc` che serve a `reservePushSlot`. */
+function fakeClient(
+  rpc: (name: string, params: unknown) => Promise<{ data: unknown; error: unknown }>,
+) {
+  return { rpc } as unknown as Parameters<typeof reservePushSlot>[0]
+}
+
+Deno.test('reservePushSlot inoltra i parametri alla RPC giusta', async () => {
+  let captured: { name: string; params: unknown } | null = null
+  const client = fakeClient((name, params) => {
+    captured = { name, params }
+    return Promise.resolve({ data: true, error: null })
+  })
+
+  const ok = await reservePushSlot(client, 'token-abc', 3)
+
+  assertEquals(ok, true)
+  assertEquals(captured, {
+    name: 'reserve_push_slot',
+    params: { p_token: 'token-abc', p_limit: 3 },
+  })
+})
+
+Deno.test('reservePushSlot dice no quando la RPC risponde false', async () => {
+  const client = fakeClient(() => Promise.resolve({ data: false, error: null }))
+  assertEquals(await reservePushSlot(client, 'token-abc', 3), false)
+})
+
+Deno.test('reservePushSlot dice no quando la RPC va in errore', async () => {
+  // Fail-closed: senza un conteggio affidabile meglio non inviare che spammare.
+  const client = fakeClient(() =>
+    Promise.resolve({ data: null, error: { message: 'boom' } })
+  )
+  assertEquals(await reservePushSlot(client, 'token-abc', 3), false)
 })

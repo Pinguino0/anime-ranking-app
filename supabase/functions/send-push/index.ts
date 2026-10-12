@@ -403,6 +403,40 @@ async function sendToToken(
 }
 
 // ---------------------------------------------------------------------------
+// Limite giornaliero
+// ---------------------------------------------------------------------------
+
+/**
+ * Prenota uno slot di push per il dispositivo.
+ *
+ * Chiama la RPC `reserve_push_slot`, che incrementa il contatore solo se il
+ * tetto giornaliero non e' ancora raggiunto. Se la RPC fallisce si sceglie di
+ * NON inviare: il contatore e' l'unica difesa contro una raffica, e al massimo
+ * la notifica in-app copre comunque l'avviso.
+ *
+ * Esportata per i test: un errore di riferimento qui farebbe fallire l'intera
+ * catena dei push con un 500 (successo davvero, vedi il fix del 2026-10-12),
+ * quindi vale la pena poterla chiamare in isolamento.
+ */
+export async function reservePushSlot(
+  client: SupabaseClient<any>,
+  token: string,
+  limit: number,
+): Promise<boolean> {
+  const { data, error } = await client.rpc('reserve_push_slot', {
+    p_token: token,
+    p_limit: limit,
+  })
+
+  if (error) {
+    console.error('send-push: prenotazione slot fallita', error.message)
+    return false
+  }
+
+  return data === true
+}
+
+// ---------------------------------------------------------------------------
 // Azione
 // ---------------------------------------------------------------------------
 
