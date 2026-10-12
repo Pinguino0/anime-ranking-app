@@ -341,7 +341,14 @@ class _StandardTab extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            RankingTable(rows: rows, groupId: groupId),
+                            // La tabella ha una larghezza propria che cresce con
+                            // i numeri: posizioni a quattro cifre la spingono
+                            // oltre lo schermo. Uno scorrimento orizzontale la
+                            // lascia leggibile invece di far traboccare le righe.
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: RankingTable(rows: rows, groupId: groupId),
+                            ),
                             _LoadMore(groupId: groupId, controller: controller),
                           ],
                         ),
@@ -1249,11 +1256,18 @@ class _PositionBadge extends StatelessWidget {
                     : ArColors.borderSoft,
               ),
             ),
-            child: Text(
-              '${entry.position}',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: top ? medal : ArColors.textMid,
-                fontVariations: const [FontVariation('wght', 700)],
+            child: FittedBox(
+              // Posizioni a quattro cifre non entrerebbero nei 28 pixel del
+              // riquadro: invece di traboccare, il numero si rimpicciolisce
+              // quanto basta. Il riquadro resta della stessa dimensione per
+              // tutte le righe, cosi' la colonna dei numeri e' allineata.
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '${entry.position}',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: top ? medal : ArColors.textMid,
+                  fontVariations: const [FontVariation('wght', 700)],
+                ),
               ),
             ),
           ),
@@ -1261,11 +1275,14 @@ class _PositionBadge extends StatelessWidget {
             const SizedBox(height: ArSpace.xxs),
             // Freccia oltre il segno: il "+3" da solo dice che il numero e'
             // cambiato, la freccia dice in che verso.
-            Text(
-              '${delta > 0 ? '↑' : '↓'}${delta.abs()}',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: delta > 0 ? ArColors.success : ArColors.danger,
-                fontVariations: const [FontVariation('wght', 600)],
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '${delta > 0 ? '↑' : '↓'}${delta.abs()}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: delta > 0 ? ArColors.success : ArColors.danger,
+                  fontVariations: const [FontVariation('wght', 600)],
+                ),
               ),
             ),
           ],

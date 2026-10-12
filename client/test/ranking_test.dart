@@ -1126,6 +1126,48 @@ void main() {
       expect(find.text('+0'), findsNothing);
     });
 
+    testWidgets('una posizione a quattro cifre resta dentro il badge', (tester) async {
+      await pump(
+        tester,
+        repository: FakeRankingRepository(initial: [
+          // Le prime tre finiscono sul podio, che non usa il badge.
+          buildRankingEntry(animeId: 'p1', position: 1),
+          buildRankingEntry(animeId: 'p2', position: 2),
+          buildRankingEntry(animeId: 'p3', position: 3),
+          buildRankingEntry(animeId: 'a4', position: 1234, positionDelta: -1234),
+        ]),
+      );
+
+      // Il numero c'e'...
+      expect(find.text('1234'), findsOneWidget);
+      expect(find.text('↓1234'), findsOneWidget);
+
+      // ...e sta dentro il riquadro: senza il ridimensionamento traboccherebbe
+      // oltre i 28 pixel del badge.
+      final numero = tester.getSize(
+        find.ancestor(of: find.text('1234'), matching: find.byType(FittedBox)),
+      );
+      expect(numero.width, lessThanOrEqualTo(28));
+    });
+
+    testWidgets('la tabella non trabocca con numeri a quattro cifre', (tester) async {
+      // Da desktop la classifica e' una DataTable, che ha una larghezza propria
+      // e non si restringe: senza lo scorrimento orizzontale una posizione
+      // grande farebbe traboccare la riga. Il test fallirebbe con l'overflow.
+      await pump(
+        tester,
+        repository: FakeRankingRepository(initial: [
+          buildRankingEntry(animeId: 'p1', position: 1),
+          buildRankingEntry(animeId: 'p2', position: 2),
+          buildRankingEntry(animeId: 'p3', position: 3),
+          buildRankingEntry(animeId: 'a4', position: 1234),
+        ]),
+        size: const Size(1200, 900),
+      );
+
+      expect(find.text('1234'), findsOneWidget);
+    });
+
     testWidgets('un anime senza voto offre il pulsante stella', (tester) async {
       await pump(tester, repository: FakeRankingRepository(initial: [buildRankingEntry()]));
 

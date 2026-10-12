@@ -13,7 +13,7 @@ e guarda la classifica crescere insieme a quella dei tuoi amici.
 [![Dart](https://img.shields.io/badge/Dart-3.13-0175C2?logo=dart&logoColor=white)](https://dart.dev)
 [![Supabase](https://img.shields.io/badge/backend-Supabase-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com)
 [![Piattaforme](https://img.shields.io/badge/Android%20%C2%B7%20Windows%20%C2%B7%20iOS%20(in%20arrivo)-333?logo=android&logoColor=white)](#-piattaforme)
-[![Tests](https://img.shields.io/badge/flutter%20test-565%20verdi-2ea44f)](#-qualit%C3%A0)
+[![Tests](https://img.shields.io/badge/flutter%20test-603%20verdi-2ea44f)](#-qualit%C3%A0)
 
 </div>
 
@@ -47,6 +47,7 @@ Netflix e senza fingere di essere uno streaming con licenza.
 | 🥇 | **Tornei** | Tabelloni a eliminazione tra i titoli del gruppo |
 | 🔔 | **Notifiche** | Push (anche ad app chiusa, max 3 al giorno per dispositivo) e centro attività |
 | 🎖️ | **Achievements** | Obiettivi sbloccabili mentre guardi |
+| 💬 | **Discussione** | Commenti e risposte per anime, dentro i gruppi, con spoiler |
 
 ---
 
@@ -140,7 +141,7 @@ anime-ranking-app/
 ```powershell
 cd client
 flutter analyze     # → "No issues found!"
-flutter test        # → 565 test verdi
+flutter test        # → 603 test verdi
 ```
 
 **Android (APK)**
@@ -176,7 +177,7 @@ flutter build windows --release `
 | Cosa | Risultato |
 | :-- | :-- |
 | `flutter analyze` | ✅ No issues found |
-| `flutter test` | ✅ 565 verdi |
+| `flutter test` | ✅ 603 verdi |
 | Edge Function `send-push` | ✅ 12 test Deno |
 | Edge Function `resolve-source` | ✅ test Deno verdi |
 
