@@ -1,7 +1,7 @@
 name: animerank
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.0.10+10
+version: 0.0.11+11
 
 environment:
   sdk: ^3.13.4

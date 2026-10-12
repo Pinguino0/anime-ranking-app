@@ -62,9 +62,16 @@ class FakeEpisodesRepository implements EpisodesRepository {
   /// e sul provider vero la seconda chiamata costerebbe una richiesta inutili.
   int resolutionCalls = 0;
 
+  /// Chiamate a [forAnime], una per lettura dell'elenco.
+  ///
+  /// Serve a verificare che la lista a schermo venga riletta solo quando la
+  /// sincronizzazione ha davvero aggiunto qualcosa.
+  int forAnimeCalls = 0;
+
   @override
   Future<List<Episode>> forAnime(String animeId) async {
     _maybeFail();
+    forAnimeCalls++;
     return episodes;
   }
 
@@ -108,6 +115,36 @@ class FakeEpisodesRepository implements EpisodesRepository {
 
   @override
   Future<int?> progress(String episodeId) async => savedSeconds[episodeId];
+
+  /// Ultimo riferimento al provider restituito, anime -> record (o `null`).
+  final Map<String, EpisodeProviderRef?> providerRefs = {};
+
+  /// Episodi "nuovi" che [syncEpisodes] deve dichiarare, anime -> quanti.
+  final Map<String, int> syncAdded = {};
+
+  /// Anime di cui e' stata chiesta la sincronizzazione, in ordine.
+  final List<String> syncCalls = [];
+
+  /// Ritardo artificiale di [syncEpisodes].
+  ///
+  /// Serve a osservare il caso "due giri in parallelo": senza un attesa il
+  /// primo giro finirebbe prima che il secondo cominci, e la guardia non
+  /// verrebbe mai esercitata.
+  Duration syncDelay = Duration.zero;
+
+  @override
+  Future<EpisodeProviderRef?> providerRef(String animeId) async {
+    _maybeFail();
+    return providerRefs[animeId];
+  }
+
+  @override
+  Future<int> syncEpisodes(String animeId) async {
+    _maybeFail();
+    syncCalls.add(animeId);
+    if (syncDelay > Duration.zero) await Future<void>.delayed(syncDelay);
+    return syncAdded[animeId] ?? 0;
+  }
 
   void _maybeFail() {
     final failure = failWith;

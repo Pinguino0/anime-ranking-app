@@ -398,6 +398,54 @@ class Episode {
       );
 }
 
+/// Il record del provider da cui chiedere quanti episodi ha un anime.
+///
+/// Lo restituisce la lettura lato database (`anime_episode_ref`): il database sa
+/// a quale record del provider corrisponde l'anime, il telefono sa parlare con
+/// quel provider. Insieme compongono la richiesta di sincronizzazione, e non
+/// sono un dato che la interfaccia mostra — per questo non passano da uno
+/// schermo, solo dal repository.
+class EpisodeProviderRef {
+  const EpisodeProviderRef({
+    required this.providerSlug,
+    required this.providerAnimeId,
+    required this.canonicalUrl,
+    required this.episodesCount,
+  });
+
+  final String providerSlug;
+  final String providerAnimeId;
+
+  /// La pagina dell'anime sul provider (es. AnimeUnity), da cui ricavare il
+  /// conteggio vero.
+  final String canonicalUrl;
+
+  /// Quanti episodi risultano al provider *dall'ultima sincronizzazione*.
+  ///
+  /// Serve solo a decidere se vale la pena chiedere: se il provider non dice
+  /// di piu', non c'e' niente da allineare.
+  final int episodesCount;
+
+  /// Legge una riga della RPC, o `null` se e' inutilizzabile.
+  ///
+  /// L'URL e' la condizione necessaria: senza indirizzo non c'e' niente da
+  /// rileggere, e chiedere a un provider sconosciuto sarebbe un errore peggiore
+  /// di un salto silenzioso.
+  static EpisodeProviderRef? tryParse(Map<String, dynamic> row) {
+    final slug = _asString(row['provider_slug']);
+    final providerId = _asString(row['provider_anime_id']);
+    final url = _asString(row['canonical_url']);
+    if (slug == null || providerId == null || url == null) return null;
+
+    return EpisodeProviderRef(
+      providerSlug: slug,
+      providerAnimeId: providerId,
+      canonicalUrl: url,
+      episodesCount: _asInt(row['episodes_count']) ?? 0,
+    );
+  }
+}
+
 /// Errore sulle operazioni sugli episodi.
 ///
 /// Estende [AppFailure] come le altre failure del progetto, cosi' la schermata

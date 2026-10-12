@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../domain/episode.dart';
+import '../episode_sync_controller.dart';
 import '../episodes_controller.dart';
 import '../widgets/episode_player.dart';
 import '../widgets/episode_rating_bar.dart';
@@ -71,6 +74,11 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
   void initState() {
     super.initState();
     _saver = WatchProgressSaver(ref.read(episodesRepositoryProvider));
+
+    // Prima di mostrare l'elenco si chiede al provider se ha episodi nuovi.
+    // Non blocca niente: la lista di prima compare subito, e se il conteggio
+    // e' cambiato si ricarica da sola (senza che l'utente debba ricaricare).
+    unawaited(ref.read(episodeSyncProvider).syncAnime(widget.animeId));
   }
 
   void _openEpisode(String id) {

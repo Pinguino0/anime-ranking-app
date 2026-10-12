@@ -47,6 +47,20 @@ abstract interface class EpisodesRepository {
   /// Registra il voto su un episodio. `null` lo cancella.
   Future<double?> rate(String episodeId, double? score);
 
+  /// Il provider da cui chiedere gli episodi di un anime.
+  ///
+  /// `null` quando l'anime non e' agganciato a nessun provider: in quel caso
+  /// non c'e' niente da rileggere.
+  Future<EpisodeProviderRef?> providerRef(String animeId);
+
+  /// Allinea gli episodi di un anime al provider adesso.
+  ///
+  /// Restituisce quanti episodi nuovi ha creato (`0` se nessuno). Non e' un
+  /// fallimento che il provider non risponda: a chiamarla e' una schermata che
+  /// sta gia' mostrando una lista valida, e un errore di rete non cambia quello
+  /// che l'utente vede.
+  Future<int> syncEpisodes(String animeId);
+
   /// Salva a che punto si e' arrivati.
   Future<void> saveProgress(
     String episodeId,
@@ -59,14 +73,25 @@ abstract interface class EpisodesRepository {
 }
 
 class SupabaseEpisodesRepository implements EpisodesRepository {
-  SupabaseEpisodesRepository(this._client, {ClientSourceExtractor? clientExtractor})
-      : _clientExtractor = clientExtractor ?? AnimeUnityExtractor();
+  SupabaseEpisodesRepository(
+    this._client, {
+    ClientSourceExtractor? clientExtractor,
+    ClientEpisodeCounts? episodeCounts,
+  })  : _clientExtractor = clientExtractor ?? AnimeUnityExtractor(),
+        _episodeCounts = episodeCounts ?? AnimeUnityExtractor();
 
   final SupabaseClient _client;
 
   /// Chi risolve le fonti che il backend non puo' (AnimeUnity, dietro
   /// Cloudflare). Iniettabile perche' i test non devono toccare la rete.
   final ClientSourceExtractor _clientExtractor;
+
+  /// Chi sa dire quanti episodi ha AnimeUnity adesso.
+  ///
+  /// Stessa macchina dell'estrazione ma con un'interfaccia a parte: la
+  /// sincronizzazione e' iniettata a parte nei test, dove la si vuole
+  /// controllare senza dover fingere anche una risoluzione video.
+  final ClientEpisodeCounts _episodeCounts;
 
   /// Id dell'utente collegato.
   ///
@@ -317,6 +342,66 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
     } catch (_) {
       throw const EpisodesFailure(
         'Progresso non leggibile. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<EpisodeProviderRef?> providerRef(String animeId) async {
+    try {
+      final rows = await _client.rpc(
+        'anime_episode_ref',
+        params: {'_anime_id': animeId},
+      );
+
+      final first = _rows(rows).firstOrNull;
+      if (first == null) return null;
+
+      return EpisodeProviderRef.tryParse(_map(first));
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on EpisodesFailure {
+      rethrow;
+    } catch (_) {
+      throw const EpisodesFailure(
+        'Episodi non rileggibili dal provider.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<int> syncEpisodes(String animeId) async {
+    // Il conteggio vero lo sa solo il provider: qui si decide *se* chiederlo,
+    // non *quanto* vale. Il database rilegge il numero dal client e lo applica
+    // entro limiti stretti (vedi 20261012161356_episode_sync.sql).
+    final ref = await providerRef(animeId);
+    if (ref == null) return 0;
+
+    final count = await _episodeCounts.fetchEpisodeCount(ref.canonicalUrl);
+    if (count == null || count <= ref.episodesCount) return 0;
+
+    try {
+      final result = await _client.rpc(
+        'sync_anime_episodes',
+        params: {
+          '_anime_id': animeId,
+          '_episodes_count': count,
+          '_provider_slug': ref.providerSlug,
+          '_provider_anime_id': ref.providerAnimeId,
+        },
+      );
+
+      if (result is num) return result.toInt();
+      return 0;
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on EpisodesFailure {
+      rethrow;
+    } catch (_) {
+      throw const EpisodesFailure(
+        'Sincronizzazione episodi non riuscita.',
         isRetryable: true,
       );
     }

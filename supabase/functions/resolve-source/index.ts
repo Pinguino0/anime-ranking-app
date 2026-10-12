@@ -49,6 +49,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { extractWatchId, mockResolver } from './providers/mock.ts'
 import { genericApiResolver } from './providers/generic-api.ts'
 import { nativeResolver, ProviderError, requiresClientExtraction } from './providers/native.ts'
+import { hentaiworldResolver } from './providers/hentaiworld.ts'
 import type { AnimeEpisodeMeta, ProviderRow, SourceRow, SourceType, VideoResolver } from './types.ts'
 
 // Iniezione di SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY: sono nelle
@@ -108,6 +109,7 @@ const RESOLVERS: Record<string, VideoResolver> = {
   mock: mockResolver,
   generic_api: genericApiResolver,
   native: nativeResolver,
+  hentaiworld: hentaiworldResolver,
 }
 
 // ---------------------------------------------------------------------------

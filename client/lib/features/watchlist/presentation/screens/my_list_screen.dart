@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
 import '../../../groups/domain/group.dart';
 import '../../../groups/presentation/groups_controller.dart';
+import '../../../episodes/presentation/episode_sync_controller.dart';
 import '../../domain/watchlist.dart';
 import '../watchlist_controller.dart';
 import 'watchlist_screen.dart';
@@ -16,11 +19,55 @@ import 'watchlist_screen.dart';
 /// solo cio' che l'utente segue per conto suo, senza passare da un gruppo. La
 /// watchlist condivisa di un gruppo sta invece nella scheda del gruppo, dove
 /// compaiono anche le voci consigliate dagli altri membri.
-class MyListScreen extends ConsumerWidget {
+class MyListScreen extends ConsumerStatefulWidget {
   const MyListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MyListScreen> createState() => _MyListScreenState();
+}
+
+class _MyListScreenState extends ConsumerState<MyListScreen> {
+  /// Il riallineamento parte una volta per apertura, non a ogni ridisegno.
+  bool _synced = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Quando la lista personale e' pronta si chiedono al provider gli episodi
+    // nuovi degli anime seguiti: e' da qui che nascono le notifiche "nuovo
+    // episodio", ed e' l'unico posto dove la domanda ha senso farla (il
+    // telefono parla con AnimeUnity, il datacenter no). La richiesta e' in
+    // secondo piano: la lista compare subito.
+    ref.listenManual(
+      myListProvider,
+      (_, next) => _syncIfReady(next),
+      fireImmediately: true,
+    );
+  }
+
+  void _syncIfReady(AsyncValue<List<WatchlistEntry>> value) {
+    if (_synced) return;
+
+    final entries = value.value;
+    if (entries == null) return;
+    _synced = true;
+
+    // Solo gli anime ancora aperti: un'opera completata o droppata non riceve
+    // episodi nuovi, e rileggerla sarebbe una richiesta per niente.
+    final ids = [
+      for (final entry in entries)
+        if (entry.status != WatchStatus.completed &&
+            entry.status != WatchStatus.dropped)
+          entry.animeId,
+    ];
+    if (ids.isEmpty) return;
+
+    unawaited(ref.read(episodeSyncProvider).syncFollowed(ids));
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final list = ref.watch(myListProvider);
 
     return Scaffold(
@@ -31,7 +78,11 @@ class MyListScreen extends ConsumerWidget {
           IconButton(
             tooltip: 'Aggiorna',
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => ref.read(myListProvider.notifier).refresh(),
+            onPressed: () {
+              // A mano si vuole anche l'ultimo episodio, non solo le voci.
+              _synced = false;
+              ref.read(myListProvider.notifier).refresh();
+            },
           ),
         ],
       ),

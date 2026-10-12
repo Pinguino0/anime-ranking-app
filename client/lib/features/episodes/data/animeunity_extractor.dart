@@ -34,6 +34,16 @@ abstract interface class ClientSourceExtractor {
   });
 }
 
+/// Chi sa dire quanti episodi ha un'opera, adesso, secondo il provider.
+///
+/// Tenuta separata da [ClientSourceExtractor] perche' sono due domande diverse:
+/// "quanti episodi ci sono" si fa aprendo la scheda, "dammi il video" si fa
+/// premendo play. Un finto nei test puo' rispondere a una e non all'altra.
+abstract interface class ClientEpisodeCounts {
+  /// Il totale di episodi secondo il provider, `null` se non lo dice.
+  Future<int?> fetchEpisodeCount(String canonicalUrl);
+}
+
 /// Estrae un episodio di AnimeUnity direttamente dal telefono.
 ///
 /// AnimeUnity sta dietro Cloudflare e risponde 403 a un indirizzo di datacenter:
@@ -52,7 +62,7 @@ abstract interface class ClientSourceExtractor {
 /// Tutto con `dart:io`, senza pacchetti HTTP aggiuntivi: i cookie di sessione si
 /// leggono e si rimandano a mano, che e' l'unica cosa che un client HTTP
 /// generico non fa da solo.
-class AnimeUnityExtractor implements ClientSourceExtractor {
+class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts {
   AnimeUnityExtractor();
 
   static const String _base = 'https://www.animeunity.so';
@@ -102,6 +112,31 @@ class AnimeUnityExtractor implements ClientSourceExtractor {
       }
       rethrow;
     }
+  }
+
+  /// Quanti episodi ha AnimeUnity adesso.
+  ///
+  /// Una GET sola su `/info_api/{animeId}/1`: il totale viaggia con la prima
+  /// puntata, quindi non serve scaricare l'elenco intero. Riusa la stessa
+  /// sessione (cookie + token CSRF) gia' comprata per l'estrazione.
+  ///
+  /// Non solleva per un guasto di rete: senza conteggio la lista resta quella
+  /// che era, e chi chiama non deve gestire un fallimento che non cambia nulla.
+  @override
+  Future<int?> fetchEpisodeCount(String canonicalUrl) async {
+    final animeId = _parseAnimeId(canonicalUrl);
+    if (animeId == null) return null;
+
+    final session = await _getSession();
+    final uri = Uri.parse('$_base/info_api/$animeId/1').replace(
+      queryParameters: {'start_range': '1', 'end_range': '1'},
+    );
+
+    final info = await _apiJson(uri, _apiHeaders(session));
+    final raw = info['episodes_count'];
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw);
+    return null;
   }
 
   Future<ResolvedSource> _extract({

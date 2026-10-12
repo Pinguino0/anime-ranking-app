@@ -2,6 +2,7 @@ import 'package:animerank/core/theme/app_theme.dart';
 import 'package:animerank/core/ui/section_header.dart';
 import 'package:animerank/features/episodes/data/episodes_repository.dart';
 import 'package:animerank/features/episodes/domain/episode.dart';
+import 'package:animerank/features/episodes/presentation/episode_sync_controller.dart';
 import 'package:animerank/features/episodes/presentation/episodes_controller.dart';
 import 'package:animerank/features/episodes/presentation/screens/episode_screen.dart';
 import 'package:animerank/features/episodes/presentation/widgets/episode_player.dart';
@@ -931,6 +932,147 @@ void main() {
       // che il finto la implementi, il fallimento arriva qui e non in un test
       // di schermata, che direbbe solo "qualcosa non funziona".
       expect(FakeEpisodesRepository(), isA<EpisodesRepository>());
+    });
+  });
+
+  group('riferimento al provider', () {
+    test('legge una riga completa e converte i numeri-stringa', () {
+      // Postgres manda `bigint` come stringa: senza la conversione il conteggio
+      // confrontato con quello nuovo sarebbe sempre "diverso".
+      final ref = EpisodeProviderRef.tryParse({
+        'provider_slug': 'animeunity',
+        'provider_anime_id': '1234',
+        'canonical_url': 'https://www.animeunity.so/anime/1234-x',
+        'episodes_count': '12',
+      });
+
+      expect(ref, isNotNull);
+      expect(ref!.providerSlug, 'animeunity');
+      expect(ref.providerAnimeId, '1234');
+      expect(ref.canonicalUrl, 'https://www.animeunity.so/anime/1234-x');
+      expect(ref.episodesCount, 12);
+    });
+
+    test('senza indirizzo non c\'e\' niente da rileggere', () {
+      // L'URL e' la condizione necessaria: chiedere a un provider senza sapere
+      // dove guardare sarebbe un errore, non un tentativo.
+      expect(
+        EpisodeProviderRef.tryParse({
+          'provider_slug': 'animeunity',
+          'provider_anime_id': '1234',
+        }),
+        isNull,
+      );
+    });
+
+    test('un conteggio assente vale zero, non un errore', () {
+      final ref = EpisodeProviderRef.tryParse({
+        'provider_slug': 'animeunity',
+        'provider_anime_id': '1234',
+        'canonical_url': 'https://www.animeunity.so/anime/1234-x',
+      });
+
+      expect(ref, isNotNull);
+      expect(ref!.episodesCount, 0);
+    });
+  });
+
+  group('sincronizzazione episodi', () {
+    ProviderContainer makeContainer(FakeEpisodesRepository repository) {
+      final container = ProviderContainer(
+        overrides: [episodesRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    test('restituisce quanti episodi ha aggiunto', () async {
+      final repository = FakeEpisodesRepository()..syncAdded['anime-1'] = 3;
+      final container = makeContainer(repository);
+
+      final added = await container.read(episodeSyncProvider).syncAnime('anime-1');
+
+      expect(added, 3);
+      expect(repository.syncCalls, ['anime-1']);
+    });
+
+    test('un guasto di rete non solleva', () async {
+      // A chiamare e' una schermata che sta gia' mostrando una lista valida:
+      // un errore di rete non cambia quello che l'utente vede, quindi non deve
+      // arrivare fino a lui sotto forma di eccezione.
+      final repository = FakeEpisodesRepository(
+        failWith: const EpisodesFailure('rete assente'),
+      );
+      final container = makeContainer(repository);
+
+      final added = await container.read(episodeSyncProvider).syncAnime('anime-1');
+
+      expect(added, 0);
+    });
+
+    test('due giri in parallelo non si sovrappongono', () async {
+      // Il secondo giro lascerebbe la sessione di AnimeUnity in ballo per
+      // niente: la guardia lo respinge subito, senza accodarsi.
+      final repository = FakeEpisodesRepository()
+        ..syncDelay = const Duration(milliseconds: 20)
+        ..syncAdded['anime-1'] = 1;
+      final container = makeContainer(repository);
+      final controller = container.read(episodeSyncProvider);
+
+      final first = controller.syncAnime('anime-1');
+      final second = controller.syncAnime('anime-1');
+
+      expect(await second, 0, reason: 'il secondo giro non aspetta il primo');
+      expect(await first, 1);
+      expect(repository.syncCalls, ['anime-1']);
+    });
+
+    test('la lista si rilegge solo se qualcosa e\' cambiato', () async {
+      final repository = FakeEpisodesRepository()..syncAdded['anime-1'] = 2;
+      final container = makeContainer(repository);
+
+      await container.read(episodesProvider('anime-1').future);
+      expect(repository.forAnimeCalls, 1);
+
+      await container.read(episodeSyncProvider).syncAnime('anime-1');
+      await container.read(episodesProvider('anime-1').future);
+
+      expect(repository.forAnimeCalls, 2,
+          reason: 'con episodi nuovi la lista a schermo va riletta');
+    });
+
+    test('senza episodi nuovi la lista resta quella che era', () async {
+      final repository = FakeEpisodesRepository();
+      final container = makeContainer(repository);
+
+      await container.read(episodesProvider('anime-1').future);
+      expect(repository.forAnimeCalls, 1);
+
+      await container.read(episodeSyncProvider).syncAnime('anime-1');
+      await container.read(episodesProvider('anime-1').future);
+
+      expect(repository.forAnimeCalls, 1);
+    });
+
+    test('il giro dell\'elenco si ferma a otto anime', () async {
+      // Un elenco lungo non deve trasformarsi in decine di richieste a ogni
+      // apertura: il tetto e' parte del comportamento, non un dettaglio.
+      final repository = FakeEpisodesRepository();
+      final container = makeContainer(repository);
+      final ids = [for (var i = 0; i < 12; i++) 'anime-$i'];
+
+      await container.read(episodeSyncProvider).syncFollowed(ids);
+
+      expect(repository.syncCalls, ids.take(8));
+    });
+
+    test('la stessa serie non si sincronizza due volte', () async {
+      final repository = FakeEpisodesRepository();
+      final container = makeContainer(repository);
+
+      await container.read(episodeSyncProvider).syncFollowed(['a', 'a', 'b']);
+
+      expect(repository.syncCalls, ['a', 'b']);
     });
   });
 }
