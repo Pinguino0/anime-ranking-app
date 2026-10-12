@@ -10,6 +10,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/transitions.dart';
+import '../../../comments/presentation/widgets/discussion_section.dart';
 import '../../../groups/domain/group.dart';
 import '../../../groups/presentation/groups_controller.dart';
 import '../../../ranking/domain/ranking.dart';
@@ -103,6 +104,8 @@ class AnimeDetailScreen extends ConsumerWidget {
                   SliverToBoxAdapter(child: _Synopsis(entry: entry)),
                 if (entry.id != null)
                   SliverToBoxAdapter(child: _WatchOrder(animeId: entry.id!)),
+                if (entry.id != null)
+                  SliverToBoxAdapter(child: DiscussionSection(animeId: entry.id!)),
                 SliverToBoxAdapter(
                   child: SizedBox(
                     height: ArSpace.xxl + ArSpace.lg,

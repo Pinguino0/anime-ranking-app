@@ -17,6 +17,8 @@ import 'features/anime/data/anime_repository.dart';
 import 'features/anime/presentation/anime_controller.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/auth/presentation/auth_controller.dart';
+import 'features/comments/data/comments_repository.dart';
+import 'features/comments/presentation/comments_controller.dart';
 import 'features/episodes/data/episodes_repository.dart';
 import 'features/episodes/presentation/episodes_controller.dart';
 import 'features/duels/data/duels_repository.dart';
@@ -126,6 +128,9 @@ Future<void> main() async {
       ),
       achievementsRepositoryProvider.overrideWithValue(
         SupabaseAchievementsRepository(client),
+      ),
+      commentsRepositoryProvider.overrideWithValue(
+        SupabaseCommentsRepository(client),
       ),
       // Il catalogo non va in cache: cambia di continuo, e mostrare una
       // copia vecchia su una ricerca ripeterebbe l'effetto scomodo che la

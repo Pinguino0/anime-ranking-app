@@ -2,11 +2,13 @@ import 'package:animerank/core/theme/app_theme.dart';
 import 'package:animerank/features/anime/domain/anime.dart';
 import 'package:animerank/features/anime/presentation/anime_controller.dart';
 import 'package:animerank/features/anime/presentation/screens/anime_detail_screen.dart';
+import 'package:animerank/features/comments/presentation/comments_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers/fake_anime.dart';
+import 'helpers/fake_comments.dart';
 
 /// Schermata della scheda anime.
 ///
@@ -31,6 +33,8 @@ Widget _host(
       animeRepositoryProvider.overrideWithValue(
         repository ?? FakeAnimeRepository(),
       ),
+      // La discussione in fondo alla scheda legge i commenti.
+      commentsRepositoryProvider.overrideWithValue(FakeCommentsRepository()),
     ],
     child: MaterialApp(
       theme: AppTheme.dark,
@@ -182,6 +186,8 @@ void main() {
         ProviderScope(
           overrides: [
             animeRepositoryProvider.overrideWithValue(FakeAnimeRepository()),
+            commentsRepositoryProvider
+                .overrideWithValue(FakeCommentsRepository()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,

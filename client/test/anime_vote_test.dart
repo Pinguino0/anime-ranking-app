@@ -1,6 +1,7 @@
 import 'package:animerank/core/theme/app_theme.dart';
 import 'package:animerank/features/anime/presentation/anime_controller.dart';
 import 'package:animerank/features/anime/presentation/screens/anime_detail_screen.dart';
+import 'package:animerank/features/comments/presentation/comments_controller.dart';
 import 'package:animerank/features/groups/domain/group.dart';
 import 'package:animerank/features/groups/presentation/groups_controller.dart';
 import 'package:animerank/features/ranking/presentation/ranking_controller.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers/fake_anime.dart';
+import 'helpers/fake_comments.dart';
 import 'helpers/fake_groups.dart';
 import 'helpers/fake_ranking.dart';
 
@@ -29,6 +31,9 @@ Widget _host({
         FakeGroupsRepository(initial: groups),
       ),
       rankingRepositoryProvider.overrideWithValue(ranking),
+      // La sezione discussione in fondo alla scheda legge i commenti: senza
+      // questo override il provider solleverebbe al primo build.
+      commentsRepositoryProvider.overrideWithValue(FakeCommentsRepository()),
     ],
     child: MaterialApp(
       theme: AppTheme.dark,
@@ -81,7 +86,7 @@ void main() {
     await _tapVote(tester);
 
     expect(find.text('Dove contare il voto?'), findsOneWidget);
-    await tester.tap(find.text('Secondo'));
+    await tester.tap(find.widgetWithText(ListTile, 'Secondo'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Vota'));
