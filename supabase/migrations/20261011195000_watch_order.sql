@@ -21,7 +21,7 @@
 
 create or replace function public.anime_watch_order(_anime_id uuid)
 returns table (
-  position         integer,
+  "position"       integer,
   is_start         boolean,
   id               uuid,
   external_id      text,
@@ -118,13 +118,13 @@ as $$
         order by
           coalesce(inf.aired_from, make_date(inf.year, 1, 1)) asc nulls last,
           inf.alid
-      )::integer as position,
+      )::integer as "position",
       inf.*
     from info inf
   )
   select
-    o.position,
-    (o.position = 1) as is_start,
+    o."position",
+    (o."position" = 1) as is_start,
     o.id,
     o.external_id,
     o.title,
@@ -142,8 +142,8 @@ as $$
     o.score,
     o.scored_by,
     o.studio
-  from info_ordered o
-  order by o.position;
+  from ordered o
+  order by o."position";
 $$;
 
 comment on function public.anime_watch_order(uuid) is
