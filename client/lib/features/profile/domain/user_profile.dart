@@ -61,11 +61,22 @@ class UserProfile {
             DateTime.fromMillisecondsSinceEpoch(0),
       );
 
+  /// Uguaglianza per contenuto, non solo per id.
+  ///
+  /// Serve piu' che altro a Riverpod: lo stato del profilo e' un
+  /// `AsyncData<UserProfile>`, e se `==` guardasse solo l'id un salvataggio
+  /// (nome, bio, foto) sarebbe considerato "uguale" e la schermata non si
+  /// ricostruirebbe, restando con i dati vecchi.
   @override
-  bool operator ==(Object other) => other is UserProfile && other.id == id;
+  bool operator ==(Object other) =>
+      other is UserProfile &&
+      other.id == id &&
+      other.username == username &&
+      other.avatarUrl == avatarUrl &&
+      other.bio == bio;
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode => Object.hash(id, username, avatarUrl, bio);
 }
 
 /// Preferenze di notifica.
@@ -153,6 +164,19 @@ class ProfileValidators {
   static const int minUsernameLength = 3;
   static const int maxUsernameLength = 24;
   static const int maxBioLength = 280;
+
+  /// Tetto di dimensione della foto profilo, in byte.
+  ///
+  /// E' lo stesso limite del bucket `avatars` (2 MB): oltre quello lo storage
+  /// rifiuta l'upload con un errore tecnico che non dice all'utente cosa fare.
+  /// Il controllo si fa prima, sia nella UI sia nel repository.
+  static const int maxAvatarBytes = 2 * 1024 * 1024;
+
+  /// Estensioni accettate dal bucket `avatars`.
+  ///
+  /// Il file scelto viene normalizzato a una di queste: una foto in un formato
+  /// diverso (per esempio HEIC da iPhone) verrebbe rifiutata dallo storage.
+  static const List<String> avatarExtensions = ['jpg', 'png', 'webp'];
 
   static final RegExp _usernamePattern = RegExp(r'^[A-Za-z0-9_]+$');
 

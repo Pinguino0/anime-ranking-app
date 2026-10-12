@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:animerank/features/profile/data/profile_repository.dart';
 import 'package:animerank/features/profile/domain/user_profile.dart';
 
@@ -24,6 +26,7 @@ class FakeProfileRepository implements ProfileRepository {
 
   int loadCalls = 0;
   int updateCalls = 0;
+  int updateAvatarCalls = 0;
   int loadNotificationsCalls = 0;
   int saveNotificationsCalls = 0;
   int deleteStoredFilesCalls = 0;
@@ -34,6 +37,7 @@ class FakeProfileRepository implements ProfileRepository {
 
   ProfileFailure? loadFailure;
   ProfileFailure? updateFailure;
+  ProfileFailure? updateAvatarFailure;
   ProfileFailure? notificationsFailure;
   ProfileFailure? saveFailure;
   ProfileFailure? deleteFilesFailure;
@@ -61,6 +65,28 @@ class FakeProfileRepository implements ProfileRepository {
       bio: bio == null
           ? profile.bio
           : (bio.trim().isEmpty ? null : bio.trim()),
+      createdAt: profile.createdAt,
+    );
+    return profile;
+  }
+
+  @override
+  Future<UserProfile> updateAvatar({
+    required Uint8List bytes,
+    required String extension,
+  }) async {
+    updateAvatarCalls++;
+    calls.add('updateAvatar');
+    final failure = updateAvatarFailure;
+    if (failure != null) throw failure;
+
+    profile = UserProfile(
+      id: profile.id,
+      username: profile.username,
+      bio: profile.bio,
+      // Indirizzo riconoscibile: il test verifica che l'avatar a schermo venga
+      // aggiornato con il risultato dell'upload.
+      avatarUrl: 'https://cdn.test/avatar_${bytes.length}.$extension',
       createdAt: profile.createdAt,
     );
     return profile;

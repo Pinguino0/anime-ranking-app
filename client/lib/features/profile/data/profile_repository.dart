@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/user_profile.dart';
@@ -11,6 +13,16 @@ abstract interface class ProfileRepository {
 
   /// Salva i campi indicati e restituisce il profilo aggiornato.
   Future<UserProfile> updateMine({String? username, String? bio, String? avatarUrl});
+
+  /// Carica una nuova foto profilo e restituisce il profilo aggiornato.
+  ///
+  /// I byte arrivano dal picker e non da un percorso: su Android il file
+  /// temporaneo scelto dalla galleria puo' non essere piu' leggibile quando
+  /// l'upload finisce.
+  Future<UserProfile> updateAvatar({
+    required Uint8List bytes,
+    required String extension,
+  });
 
   /// Elimina l'account dopo aver rimosso i file caricati.
   ///
@@ -39,12 +51,18 @@ class SupabaseProfileRepository implements ProfileRepository {
 
   final SupabaseClient _client;
 
+  /// Bucket della foto profilo.
+  static const String avatarBucket = 'avatars';
+
+  /// Bucket delle immagini dei gruppi.
+  static const String groupImagesBucket = 'group-images';
+
   /// Bucket in cui l'app lascia i file degli utenti.
   ///
   /// Sono gli stessi due del backend (015). Devono restare allineati: un
   /// bucket qui che il backend non conosce non verrebbe mai controllato prima
   /// della cancellazione dell'account.
-  static const List<String> buckets = ['avatars', 'group-images'];
+  static const List<String> buckets = [avatarBucket, groupImagesBucket];
 
   /// Sessione del collegato, o un errore che lo dice.
   ///
@@ -129,6 +147,101 @@ class SupabaseProfileRepository implements ProfileRepository {
       throw _translate(e);
     } catch (_) {
       throw const ProfileFailure('Salvataggio non riuscito. Riprova.', isRetryable: true);
+    }
+  }
+
+  @override
+  Future<UserProfile> updateAvatar({
+    required Uint8List bytes,
+    required String extension,
+  }) async {
+    // La dimensione si controlla qui e non solo nella UI: il repository e' il
+    // punto che parla con lo storage, e una chiamata fatta da un altro punto
+    // del codice deve ricevere lo stesso rifiuto.
+    if (bytes.isEmpty) {
+      throw const ProfileFailure('L immagine scelta e vuota. Scegline un altra.');
+    }
+    if (bytes.length > ProfileValidators.maxAvatarBytes) {
+      throw ProfileFailure(
+        'Immagine troppo grande (max ${ProfileValidators.maxAvatarBytes ~/ (1024 * 1024)} MB).',
+      );
+    }
+
+    final uid = _uid;
+    // Il numero nel nome evita la cache: con un indirizzo identico il client
+    // mostrerebbe ancora la foto vecchia, perche' quella e' gia' scaricata.
+    final path =
+        '$uid/avatar_${DateTime.now().millisecondsSinceEpoch}.${_normalizeExtension(extension)}';
+
+    try {
+      await _client.storage.from(avatarBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: _contentType(extension),
+              // Il percorso e' nuovo per costruzione: non si sovrascrive nulla.
+              upsert: false,
+            ),
+          );
+    } on StorageException catch (e) {
+      throw _translateStorage(e);
+    } catch (_) {
+      throw const ProfileFailure('Caricamento non riuscito. Riprova.', isRetryable: true);
+    }
+
+    final url = _client.storage.from(avatarBucket).getPublicUrl(path);
+
+    final UserProfile updated;
+    try {
+      // Prima la riga, poi la pulizia dei file vecchi: se l'update fallisse
+      // l'avatar attuale resterebbe visibile invece di sparire.
+      updated = await updateMine(avatarUrl: url);
+    } catch (_) {
+      // La riga non punta al file appena caricato: lo si toglie per non
+      // lasciare un orfano nello storage. E' una pulizia best effort.
+      await _removeFiles([path]);
+      rethrow;
+    }
+
+    await _removeOldAvatars(keep: path);
+    return updated;
+  }
+
+  /// Normalizza l'estensione a una accettata dal bucket.
+  String _normalizeExtension(String extension) {
+    final lower = extension.toLowerCase();
+    return ProfileValidators.avatarExtensions.contains(lower) ? lower : 'jpg';
+  }
+
+  String _contentType(String extension) => switch (_normalizeExtension(extension)) {
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        _ => 'image/jpeg',
+      };
+
+  /// Rimuove le foto profilo precedenti, tenendo solo [keep].
+  ///
+  /// E' best effort: la riga punta gia' al file nuovo, quindi un errore qui non
+  /// deve far fallire un caricamento riuscito. Senza questa pulizia ogni cambio
+  /// di foto lascerebbe un file orfano che la cancellazione dell'account
+  /// dovrebbe poi rimuovere.
+  Future<void> _removeOldAvatars({required String keep}) async {
+    try {
+      final files = await _listFiles(avatarBucket);
+      final stale = files.where((path) => path != keep).toList();
+      await _removeFiles(stale);
+    } catch (_) {
+      // Best effort: si ignora.
+    }
+  }
+
+  /// Rimuove un elenco di percorsi in modo tollerante agli errori.
+  Future<void> _removeFiles(List<String> paths) async {
+    if (paths.isEmpty) return;
+    try {
+      await _client.storage.from(avatarBucket).remove(paths);
+    } catch (_) {
+      // Best effort: si ignora.
     }
   }
 

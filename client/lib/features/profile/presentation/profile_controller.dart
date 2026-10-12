@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/error/app_retry.dart';
+import '../data/avatar_picker.dart';
 import '../data/profile_repository.dart';
 import '../domain/user_profile.dart';
 
@@ -8,6 +11,13 @@ import '../domain/user_profile.dart';
 final profileRepositoryProvider = Provider<ProfileRepository>((ref) {
   throw StateError('profileRepositoryProvider non e stato inizializzato.');
 });
+
+/// Scelta della foto profilo dal dispositivo.
+///
+/// Di default e' l'implementazione reale; i test la sostituiscono con un finto,
+/// perche' la galleria di sistema non esiste in un test.
+final avatarPickerProvider =
+    Provider<AvatarPicker>((ref) => ImagePickerAvatarPicker());
 
 /// Profilo dell'utente collegato.
 ///
@@ -23,6 +33,17 @@ class ProfileController extends AsyncNotifier<UserProfile> {
   Future<void> refresh() async {
     ref.invalidateSelf();
     await future;
+  }
+
+  /// Carica una nuova foto profilo e mette subito in stato il risultato.
+  ///
+  /// Lo stato viene aggiornato con l'URL nuovo: senza, l'avatar a schermo
+  /// resterebbe quello di prima fino al prossimo caricamento della pagina.
+  Future<void> setAvatar({required Uint8List bytes, required String extension}) async {
+    final updated = await ref
+        .read(profileRepositoryProvider)
+        .updateAvatar(bytes: bytes, extension: extension);
+    state = AsyncData(updated);
   }
 
   /// Salva i campi del profilo e mette subito in stato il risultato.

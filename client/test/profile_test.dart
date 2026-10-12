@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:animerank/features/auth/presentation/auth_controller.dart';
 import 'package:animerank/features/profile/domain/user_profile.dart';
 import 'package:animerank/features/profile/presentation/profile_controller.dart';
@@ -11,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import 'helpers/fake_auth.dart';
+import 'helpers/fake_avatar_picker.dart';
 import 'helpers/fake_profile.dart';
 
 void main() {
@@ -52,6 +55,21 @@ void main() {
     test('l iniziale viene dalla prima lettera', () {
       expect(buildProfile(username: 'mario').initial, 'M');
       expect(buildProfile(username: '_uno').initial, '_');
+    });
+
+    test('profili con la stessa id ma dati diversi non sono uguali', () {
+      // Riverpod confronta lo stato per uguaglianza: se `==` guardasse solo
+      // l'id, salvare nome o foto verrebbe visto come "nessun cambiamento" e la
+      // schermata non si ricostruirebbe.
+      expect(buildProfile(username: 'mario'), buildProfile(username: 'mario'));
+      expect(
+        buildProfile(username: 'mario'),
+        isNot(buildProfile(username: 'luigi')),
+      );
+      expect(
+        buildProfile(avatarUrl: 'https://a'),
+        isNot(buildProfile(avatarUrl: 'https://b')),
+      );
     });
 
     test('parse gestisce una riga incompleta', () {
@@ -132,6 +150,21 @@ void main() {
       // nuovo invece di lampeggiare quello vecchio.
       expect(c.read(profileProvider).value!.username, 'marioplus');
       expect(repo.updateCalls, 1);
+    });
+
+    test('setAvatar mette in stato il profilo con l avatar nuovo', () async {
+      final c = container();
+      await c.read(profileProvider.future);
+
+      await c.read(profileProvider.notifier).setAvatar(
+            bytes: Uint8List(8),
+            extension: 'png',
+          );
+
+      // Lo stato viene aggiornato con l'URL restituito: senza, l'avatar a
+      // schermo resterebbe quello di prima fino al prossimo caricamento.
+      expect(c.read(profileProvider).value!.avatarUrl, 'https://cdn.test/avatar_8.png');
+      expect(repo.updateAvatarCalls, 1);
     });
 
     test('bio vuota viene salvata come assente', () async {
@@ -219,6 +252,7 @@ void main() {
       WidgetTester tester,
       Widget child, {
       FakeProfileRepository? profileRepo,
+      FakeAvatarPicker? picker,
       Size? surface,
     }) async {
       final p = profileRepo ?? repo;
@@ -253,6 +287,9 @@ void main() {
           overrides: [
             profileRepositoryProvider.overrideWithValue(p),
             authRepositoryProvider.overrideWithValue(auth),
+            // Sempre sostituito: la galleria di sistema non esiste nei test, e
+            // un test che tocca il bottone non deve provare ad aprirla.
+            avatarPickerProvider.overrideWithValue(picker ?? FakeAvatarPicker()),
           ],
           child: MaterialApp.router(routerConfig: router),
         ),
@@ -378,6 +415,61 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Questo nome utente e gia preso.'), findsOneWidget);
+    });
+
+    testWidgets('la foto scelta viene caricata e aggiorna l avatar', (tester) async {
+      final picker = FakeAvatarPicker()..result = buildPickedAvatar();
+      await pumpScreen(tester, const ProfileScreen(), picker: picker);
+
+      await tester.tap(find.byTooltip('Cambia foto profilo'));
+      await tester.pumpAndSettle();
+
+      expect(picker.pickCalls, 1);
+      expect(repo.updateAvatarCalls, 1);
+      // L'avatar a schermo usa l'indirizzo restituito dall'upload: il profilo
+      // non viene ricaricato, quindi senza l'aggiornamento di stato resterebbe
+      // quello di prima.
+      final avatar = tester.widget<ProfileAvatar>(find.byType(ProfileAvatar));
+      expect(avatar.url, 'https://cdn.test/avatar_64.jpg');
+    });
+
+    testWidgets('se l utente annulla non si carica nulla', (tester) async {
+      // `result` resta null: e' il caso in cui la galleria viene chiusa senza
+      // scegliere. Non e' un errore, quindi nessun messaggio.
+      final picker = FakeAvatarPicker();
+      await pumpScreen(tester, const ProfileScreen(), picker: picker);
+
+      await tester.tap(find.byTooltip('Cambia foto profilo'));
+      await tester.pumpAndSettle();
+
+      expect(picker.pickCalls, 1);
+      expect(repo.updateAvatarCalls, 0);
+      expect(find.text('Profilo salvato.'), findsNothing);
+    });
+
+    testWidgets('un immagine troppo grande viene rifiutata prima di caricare', (tester) async {
+      final picker = FakeAvatarPicker()
+        ..result = buildPickedAvatar(size: ProfileValidators.maxAvatarBytes + 1);
+      await pumpScreen(tester, const ProfileScreen(), picker: picker);
+
+      await tester.tap(find.byTooltip('Cambia foto profilo'));
+      await tester.pumpAndSettle();
+
+      // Il rifiuto si vede prima di parlare con lo storage: l'utente non
+      // aspetta un upload da 2 MB per poi ricevere un errore tecnico.
+      expect(repo.updateAvatarCalls, 0);
+      expect(find.text('Immagine troppo grande (max 2 MB).'), findsOneWidget);
+    });
+
+    testWidgets('un caricamento della foto fallito lo dice', (tester) async {
+      repo.updateAvatarFailure = const ProfileFailure('Caricamento non riuscito.');
+      final picker = FakeAvatarPicker()..result = buildPickedAvatar();
+      await pumpScreen(tester, const ProfileScreen(), picker: picker);
+
+      await tester.tap(find.byTooltip('Cambia foto profilo'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Caricamento non riuscito.'), findsOneWidget);
     });
   });
 

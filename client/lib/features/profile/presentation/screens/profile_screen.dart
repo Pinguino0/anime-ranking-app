@@ -14,6 +14,7 @@ import '../../../../core/ui/section_header.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../../auth/presentation/auth_controller.dart';
 import '../../../auth/presentation/widgets/auth_scaffold.dart';
+import '../../data/avatar_picker.dart';
 import '../../domain/user_profile.dart';
 import '../profile_controller.dart';
 import '../widgets/avatar.dart';
@@ -143,6 +144,12 @@ class _BodyState extends ConsumerState<_Body> {
   String? _error;
   bool _saved = false;
 
+  /// Vero mentre la foto scelta sta venendo caricata.
+  ///
+  /// Separato da [_busy] perche' e' un'altra azione: salvare il nome mentre la
+  /// foto sale non deve bloccare i campi, e viceversa.
+  bool _avatarBusy = false;
+
   @override
   void dispose() {
     _username.dispose();
@@ -171,6 +178,50 @@ class _BodyState extends ConsumerState<_Body> {
       setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Sceglie e carica una nuova foto profilo.
+  ///
+  /// L'apertura della galleria e' un passo a se': puo' fallire (permesso
+  /// negato, picker non disponibile) o essere annullata, e in entrambi i casi
+  /// il profilo non va toccato. Solo dopo si passa all'upload.
+  Future<void> _changeAvatar() async {
+    final PickedAvatar? picked;
+    try {
+      picked = await ref.read(avatarPickerProvider).pick();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Non e stato possibile aprire le immagini.');
+      return;
+    }
+
+    // Annullato dall'utente: nessun messaggio, non e' un errore.
+    if (picked == null) return;
+
+    if (picked.bytes.length > ProfileValidators.maxAvatarBytes) {
+      setState(() => _error = 'Immagine troppo grande (max 2 MB).');
+      return;
+    }
+
+    setState(() {
+      _avatarBusy = true;
+      _error = null;
+      _saved = false;
+    });
+
+    try {
+      await ref.read(profileProvider.notifier).setAvatar(
+            bytes: picked.bytes,
+            extension: picked.extension,
+          );
+      if (!mounted) return;
+      setState(() => _saved = true);
+    } on ProfileFailure catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _avatarBusy = false);
     }
   }
 
@@ -225,7 +276,11 @@ class _BodyState extends ConsumerState<_Body> {
     );
 
     final hero = ArReveal(
-      child: _ProfileHero(profile: profile),
+      child: _ProfileHero(
+        profile: profile,
+        busy: _avatarBusy,
+        onEditAvatar: _changeAvatar,
+      ),
     );
 
     final editSection = Column(
@@ -471,9 +526,19 @@ String _memberSince(DateTime date) => _memberSinceFormat.format(date);
 /// e la data di iscrizione ci stanno sopra tutto il resto, e non accanto ai
 /// campi di modifica come era prima.
 class _ProfileHero extends StatelessWidget {
-  const _ProfileHero({required this.profile});
+  const _ProfileHero({
+    required this.profile,
+    required this.onEditAvatar,
+    this.busy = false,
+  });
 
   final UserProfile profile;
+
+  /// Cambia la foto profilo.
+  final VoidCallback onEditAvatar;
+
+  /// Vero mentre la foto scelta sta venendo caricata.
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -493,10 +558,23 @@ class _ProfileHero extends StatelessWidget {
         padding: const EdgeInsets.all(ArSpace.lg),
         child: Column(
           children: [
-            ProfileAvatar(
-              url: profile.avatarUrl,
-              fallbackText: profile.initial,
-              size: 104,
+            // L'avatar e il bottone di modifica stanno nello stesso `Stack`:
+            // il bottone deve cadere sull'angolo della foto, non accanto, cosi'
+            // si capisce che agisce proprio su quella.
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ProfileAvatar(
+                  url: profile.avatarUrl,
+                  fallbackText: profile.initial,
+                  size: 104,
+                ),
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: _AvatarEditButton(busy: busy, onPressed: onEditAvatar),
+                ),
+              ],
             ),
             const SizedBox(height: ArSpace.md),
             Text(
@@ -535,6 +613,49 @@ class _ProfileHero extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bottone che cambia la foto profilo.
+///
+/// Sta appoggiato sull'angolo dell'avatar: e' li' che l'utente cerca la foto da
+/// modificare, e un'azione secondaria dentro il form dei campi sembrerebbe un
+/// salvataggio del nome. Durante il caricamento mostra un indicatore al posto
+/// dell'icona, cosi' si vede che il tap e' partito.
+class _AvatarEditButton extends StatelessWidget {
+  const _AvatarEditButton({required this.busy, required this.onPressed});
+
+  final bool busy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Cambia foto profilo',
+      child: Material(
+        color: ArColors.containerHighest,
+        shape: CircleBorder(side: BorderSide(color: ArColors.border)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: busy ? null : onPressed,
+          child: SizedBox.square(
+            dimension: 36,
+            child: Center(
+              child: busy
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(
+                      Icons.photo_camera_outlined,
+                      size: 18,
+                      color: ArColors.textHigh,
+                    ),
+            ),
+          ),
         ),
       ),
     );
