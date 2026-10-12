@@ -20,13 +20,17 @@ import 'helpers/fake_episodes.dart';
 /// Va bene perche' quello che qui si verifica e' tutto il resto della pagina —
 /// titolo, elenco, voto — e il player ha i suoi test separati, sulla parte che
 /// non richiede il decoder.
-Widget _host(FakeEpisodesRepository repository, {String? episodeId}) {
+Widget _host(
+  FakeEpisodesRepository repository, {
+  String? episodeId,
+  Size size = const Size(400, 900),
+}) {
   return ProviderScope(
     overrides: [episodesRepositoryProvider.overrideWithValue(repository)],
     child: MaterialApp(
       theme: AppTheme.dark,
       home: MediaQuery(
-        data: const MediaQueryData(size: Size(400, 900)),
+        data: MediaQueryData(size: size),
         child: EpisodeScreen(animeId: 'anime-1', episodeId: episodeId),
       ),
     ),
@@ -484,6 +488,46 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(repository.resolutionCalls, 2);
+    });
+
+    testWidgets('ruotare per il full screen non ricrea il player',
+        (tester) async {
+      // La rotazione per lo schermo intero cambia la larghezza dello schermo:
+      // la schermata episodio passa dal layout "telefono" (colonna) a quello
+      // "largo" (elenco a lato). Se le due strutture non condividono l'elemento
+      // del player, Flutter lo smonta e lo ricrea, il video riparte da capo e
+      // la rotta a tutto schermo resta su un controller gia' chiuso (nero).
+      final repository = FakeEpisodesRepository(
+        episodes: [episodeFixture()],
+        sourcesByEpisode: {
+          'ep-1': [
+            sourceFixture(
+              id: 'src-canonica',
+              url: null,
+              canonicalUrl: 'https://api.example.com/watch/1',
+            ),
+          ],
+        },
+      );
+
+      await tester.pumpWidget(_host(repository));
+      Future<void> stabilizza() async {
+        for (var i = 0; i < 5; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+          // Il player vero non parte nei test e cade sulla scheda d'errore, che
+          // su un riquadro basso sborda: e' rumore del test, non del fix.
+          while (tester.takeException() != null) {}
+        }
+      }
+
+      await stabilizza();
+      expect(repository.resolutionCalls, 1);
+
+      // Da verticale a orizzontale: il player deve restare lo stesso.
+      await tester.pumpWidget(_host(repository, size: const Size(900, 400)));
+      await stabilizza();
+
+      expect(repository.resolutionCalls, 1);
     });
 
     testWidgets('una risoluzione ritentabile viene ritentata', (tester) async {

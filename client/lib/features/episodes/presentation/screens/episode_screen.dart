@@ -57,6 +57,16 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
   /// dell'episodio successivo.
   late final WatchProgressSaver _saver;
 
+  /// Chiave stabile del blocco player.
+  ///
+  /// La schermata ha due disposizioni — colonna su telefono, elenco a lato
+  /// quando e' larga — e ruotando per il full screen si passa dall'una
+  /// all'altra. Senza una chiave stabile Flutter smonta il player e lo ricrea:
+  /// il video riparte da capo e la rotta a tutto schermo resta su un controller
+  /// gia' chiuso (schermo nero). Con la chiave l'elemento viene rimontato e il
+  /// player sopravvive al cambio di disposizione.
+  final GlobalKey _playerKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -117,7 +127,11 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
     final size = Breakpoints.fromContext(context);
     final wide = !size.isCompact;
 
-    final player = _PlayerBlock(episode: episode, saver: _saver);
+    final player = _PlayerBlock(
+      episode: episode,
+      saver: _saver,
+      playerKey: _playerKey,
+    );
 
     final details = _Details(episode: episode, animeId: widget.animeId);
 
@@ -230,10 +244,21 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
 /// [EpisodePlayer]. Qui c'e' solo l'indice della fonte, che e' l'unica cosa che
 /// il selettore e il player devono condividere.
 class _PlayerBlock extends ConsumerWidget {
-  const _PlayerBlock({required this.episode, required this.saver});
+  const _PlayerBlock({
+    required this.episode,
+    required this.saver,
+    required this.playerKey,
+  });
 
   final Episode episode;
   final WatchProgressSaver saver;
+
+  /// Chiave stabile del player, passata dal genitore.
+  ///
+  /// Serve perche' ruotando cambia la disposizione della schermata: con una
+  /// chiave stabile il player viene rimontato invece che ricreato, e il video
+  /// non riparte da capo nel passaggio al full screen.
+  final Key playerKey;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -260,6 +285,7 @@ class _PlayerBlock extends ConsumerWidget {
           );
         }
         return _Playable(
+          key: playerKey,
           sources: list,
           episode: episode,
           saver: saver,
@@ -283,6 +309,7 @@ class _Playable extends StatefulWidget {
     required this.episode,
     required this.saver,
     required this.resolve,
+    super.key,
   });
 
   final List<EpisodeSource> sources;
