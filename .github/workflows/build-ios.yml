@@ -50,21 +50,28 @@ jobs:
           --dart-define=SUPABASE_ANON_KEY=sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc
 
       - name: Impacchetta l'IPA
+        id: package
         run: |
           set -euo pipefail
           APP="build/ios/iphoneos/Runner.app"
           test -d "$APP"
-          rm -rf Payload animerank-0.0.12-unsigned.ipa
+          # Il nome segue la versione del pubspec invece di essere scritto a
+          # mano: un numero fisso resta indietro a ogni rilascio, e si finisce
+          # per scaricare "animerank-0.0.13.ipa" che in realta' e' la 0.0.12.
+          VERSION="$(grep -m1 '^version:' pubspec.yaml | cut -d' ' -f2 | cut -d'+' -f1)"
+          IPA="animerank-${VERSION}-unsigned.ipa"
+          echo "ipa=$IPA" >> "$GITHUB_OUTPUT"
+          rm -rf Payload "$IPA"
           mkdir Payload
           cp -R "$APP" Payload/Runner.app
-          zip -qry animerank-0.0.12-unsigned.ipa Payload
-          ls -lh animerank-0.0.12-unsigned.ipa
-          unzip -l animerank-0.0.12-unsigned.ipa | sed -n '1,10p'
+          zip -qry "$IPA" Payload
+          ls -lh "$IPA"
+          unzip -l "$IPA" | sed -n '1,10p'
 
       - name: Carica l'artefatto
         uses: actions/upload-artifact@v4
         with:
           name: animerank-ios-ipa
-          path: client/animerank-0.0.12-unsigned.ipa
+          path: client/${{ steps.package.outputs.ipa }}
           if-no-files-found: error
           retention-days: 14
