@@ -46,3 +46,13 @@ enabled = true
 # e' configurata. Vedi `functions/send-push/index.ts`, `isAuthorized`.
 [functions.send-push]
 verify_jwt = false
+
+# ----------------------------------------------------------------------------
+# anime-intro
+# ----------------------------------------------------------------------------
+# `verify_jwt = true` (il default): la chiama il client per conto di un utente
+# collegato, e non c'e' nessun webhook di mezzo. La funzione poi usa la service
+# key per leggere il catalogo e la cache, che non sono scrivibili da
+# `authenticated`. Vedi `functions/anime-intro/index.ts`.
+[functions.anime-intro]
+verify_jwt = true

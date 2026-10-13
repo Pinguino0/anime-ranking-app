@@ -325,8 +325,11 @@ class _PlayerBlock extends ConsumerWidget {
           episode: episode,
           // `value` e non `when`: la sigla e' un di piu', non una cosa da
           // mostrare. Finche' arriva — o se la lettura fallisce — non c'e'
-          // pulsante, e il player funziona lo stesso.
-          intro: ref.watch(animeIntroProvider(animeId)).value,
+          // pulsante, e il player funziona lo stesso. La finestra va chiesta
+          // per episodio: la sigla cambia da puntata a puntata.
+          intro: ref
+              .watch(animeIntroProvider((animeId: animeId, episode: episode.number)))
+              .value,
           saver: saver,
           // Il resolver viene preso dal provider e non passato dal chiamante:
           // e' la stessa operazione che ha caricato le fonti, quindi deve

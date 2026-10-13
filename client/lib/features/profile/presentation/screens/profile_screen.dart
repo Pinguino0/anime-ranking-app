@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/cache/app_cache_cleanup.dart';
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/error/app_failure.dart';
 import '../../../../core/router/app_router.dart';
@@ -228,6 +229,18 @@ class _BodyState extends ConsumerState<_Body> {
     }
   }
 
+  /// Butta via le cache su disco: locandine e APK degli aggiornamenti.
+  ///
+  /// Non e' un errore se qualcosa non si cancella (una cache in uso): l'azione
+  /// resta un'utile pulizia parziale, quindi si dice solo che e' stata fatta.
+  Future<void> _clearCache() async {
+    await clearAppCaches();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Cache svuotata.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final profile = widget.profile;
@@ -371,6 +384,16 @@ class _BodyState extends ConsumerState<_Body> {
                 // starebbero.
                 value: 'Traguardi sbloccati',
                 onTap: () => context.push('/profile/achievements'),
+              ),
+              const Divider(height: 1, indent: ArSpace.md, endIndent: ArSpace.md),
+              _ActionRow(
+                icon: Icons.cleaning_services_outlined,
+                label: 'Svuota cache',
+                // Le locandine scaricate e gli APK degli aggiornamenti passati
+                // sono la voce grossa dello spazio occupato sull'app. Non sono
+                // dati dell'utente e si riscaricano da soli.
+                value: 'Libera lo spazio di locandine e aggiornamenti',
+                onTap: _clearCache,
               ),
             ],
           ),

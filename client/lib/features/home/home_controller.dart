@@ -96,6 +96,16 @@ class HomeFeedController extends AsyncNotifier<HomeFeed> {
       // Riga mancante, home intatta.
     }
 
+    // Stesso patto della stagione: se la lettura fallisce la riga sparisce e il
+    // resto della home resta in piedi. "Nuovi episodi" e' un di piu' e non vale
+    // un guasto della pagina.
+    List<AnimeEntry> fresh = const [];
+    try {
+      fresh = await repository.recentEpisodes(limit: 20);
+    } catch (_) {
+      // Riga mancante, home intatta.
+    }
+
     // Il catalogo locale alimenta le altre righe e la griglia. Se questa
     // lettura fallisce l'errore si propaga: e' un guasto vero, e mostrare la
     // season da sola farebbe credere all'utente di vedere tutta la home.
@@ -135,6 +145,12 @@ class HomeFeedController extends AsyncNotifier<HomeFeed> {
             title: 'In uscita ora',
             subtitle: 'Aggiornamenti della stagione corrente',
             entries: season,
+          ),
+        if (fresh.isNotEmpty)
+          HomeRow(
+            title: 'Nuovi episodi',
+            subtitle: 'Le ultime puntate aggiunte',
+            entries: fresh,
           ),
         _row(
           title: 'Aggiornati di recente',

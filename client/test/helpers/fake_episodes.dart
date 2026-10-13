@@ -117,18 +117,18 @@ class FakeEpisodesRepository implements EpisodesRepository {
   @override
   Future<int?> progress(String episodeId) async => savedSeconds[episodeId];
 
-  /// Sigla per anime, anime -> finestra. Vuoto di default: senza dato il player
-  /// non mostra il pulsante.
-  final Map<String, IntroMarkers> intros = {};
+  /// Sigla per (anime, episodio). Vuoto di default: senza dato il player non
+  /// mostra il pulsante.
+  final Map<(String, int), IntroMarkers> intros = {};
 
-  /// Anime di cui e' stata chiesta la sigla, in ordine.
-  final List<String> introCalls = [];
+  /// Coppie (anime, episodio) di cui e' stata chiesta la sigla, in ordine.
+  final List<(String, int)> introCalls = [];
 
   @override
-  Future<IntroMarkers?> introFor(String animeId) async {
+  Future<IntroMarkers?> introFor(String animeId, int episode) async {
     _maybeFail();
-    introCalls.add(animeId);
-    return intros[animeId];
+    introCalls.add((animeId, episode));
+    return intros[(animeId, episode)];
   }
 
   /// Ultimo riferimento al provider restituito, anime -> record (o `null`).

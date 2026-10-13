@@ -157,6 +157,17 @@ class FakeAnimeRepository implements AnimeRepository {
     return List.unmodifiable(recent.take(limit));
   }
 
+  int recentEpisodesCalls = 0;
+
+  /// Anime restituiti dalla RPC "nuovi episodi" finta.
+  List<AnimeEntry> recentEpisodesResult = const [];
+
+  @override
+  Future<List<AnimeEntry>> recentEpisodes({int limit = 20}) async {
+    recentEpisodesCalls++;
+    return List.unmodifiable(recentEpisodesResult.take(limit));
+  }
+
   @override
   Future<List<AnimeGenre>> genres() async {
     genresCalls++;

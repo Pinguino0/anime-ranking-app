@@ -48,15 +48,20 @@ final episodesProvider =
   EpisodesController.new,
 );
 
-/// La sigla di un anime, se il catalogo la conosce.
+/// La sigla di un episodio, se si conosce.
 ///
-/// `FutureProvider` e family perche' e' una lettura sola per anime e va tenuta
-/// in cache: la sigla non cambia mentre si guarda, e rileggerla a ogni
-/// ricostruzione del player sarebbe una richiesta in piu' per niente. Un errore
-/// qui non ha una schermata da mostrare: la schermata legge `.value`, che vale
-/// `null`, e il pulsante "Salta intro" semplicemente non compare.
-final animeIntroProvider = FutureProvider.family<IntroMarkers?, String>(
-  (ref, animeId) => ref.watch(episodesRepositoryProvider).introFor(animeId),
+/// `FutureProvider` e family perche' e' una lettura sola per episodio e va
+/// tenuta in cache: la sigla non cambia mentre si guarda, e rileggerla a ogni
+/// ricostruzione del player sarebbe una richiesta in piu' per niente. La chiave
+/// e' la coppia (anime, episodio) e non il solo anime: la finestra cambia da
+/// episodio a episodio, e un record di Dart ha uguaglianza strutturale, quindi
+/// la family funziona senza una classe apposta. Un errore qui non ha una
+/// schermata da mostrare: la schermata legge `.value`, che vale `null`, e il
+/// pulsante "Salta intro" semplicemente non compare.
+final animeIntroProvider =
+    FutureProvider.family<IntroMarkers?, ({String animeId, int episode})>(
+  (ref, key) =>
+      ref.watch(episodesRepositoryProvider).introFor(key.animeId, key.episode),
 );
 
 /// Fonti attive di un episodio.

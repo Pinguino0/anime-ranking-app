@@ -41,6 +41,25 @@ class AppConfig {
   /// capisca perche'.
   static const String sourceResolverFunction = 'resolve-source';
 
+  /// Nome dell'Edge Function che dice dove sta la sigla di un episodio.
+  ///
+  /// Il dato non sta nel catalogo: la sigla cambia da episodio a episodio e
+  /// nessuno la scrive a mano. La funzione la chiede a un database pubblico
+  /// (AniSkip) e la mette in cache, cosi' il player ha una finestra vera invece
+  /// di un valore inventato.
+  static const String animeIntroFunction = 'anime-intro';
+
+  /// Base del Worker Cloudflare che rimanda ad AnimeUnity le richieste quando
+  /// l'operatore mobile blocca il sito.
+  ///
+  /// Vuoto = nessun relay, si va diretti (il caso di chi e' su Wi-Fi). Il
+  /// valore arriva da `--dart-define=ANIMERANK_RELAY=...` al momento della
+  /// build, quindi non e' nel sorgente: un indirizzo personale nel codice
+  /// sarebbe una configurazione, non una costante dell'app.
+  static const String animeUnityRelay = String.fromEnvironment(
+    'ANIMERANK_RELAY',
+    defaultValue: '',
+  );
   /// Quanti giorni un anime puo' restare in cache prima di essere ricaricato
   /// dall'API esterna. Piu' alto = meno chiamate fuori, dati piu' freschi
   /// richiedono piu' chiamate. 7 giorni e' un buon compromesso: i dati di

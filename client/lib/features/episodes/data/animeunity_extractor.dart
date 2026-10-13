@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
 
 /// Una risoluzione lato client non riuscita.
@@ -107,6 +108,24 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   static _Session? _session;
   static DateTime? _sessionExpiresAt;
 
+  /// La sessione comprata passando dal Worker.
+  ///
+  /// Tenuta a parte da quella diretta: il token CSRF e' legato ai cookie di
+  /// quella sessione, e mescolarli (cookie via relay, token via rete diretta)
+  /// farebbe rispondere 419. Chi passa dal relay usa solo questa.
+  static _Session? _relaySession;
+  static DateTime? _relaySessionExpiresAt;
+
+  /// Il Worker configurato in fase di build, se c'e'.
+  static Uri? get _relay {
+    final raw = AppConfig.animeUnityRelay.trim();
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
+    return uri;
+  }
+
+
   @override
   Future<ResolvedSource> extract({
     required String sourceId,
@@ -115,50 +134,52 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     String? quality,
     String? providerSlug,
   }) async {
-    try {
-      return await _extract(
-        client: _http,
-        sourceId: sourceId,
-        canonicalUrl: canonicalUrl,
-        episodeNumber: episodeNumber,
-        quality: quality,
-        providerSlug: providerSlug,
-      );
-    } on ClientExtractionFailure catch (failure) {
-      // Un tentativo andato male puo' lasciare in cache una sessione che il
-      // server ha ormai cominciato a rifiutare (Cloudflare, token scaduto). La
-      // si butta, cosi' il prossimo tentativo — il player ne fa qualche giro,
-      // vedi `_EpisodePlayerState.resolutionTries` — ne compra una nuova invece
-      // di ripetere lo stesso errore. Su un errore non ritentabile non si tocca
-      // nulla: la sessione non c'entra con un episodio inesistente.
-      if (!failure.isRetryable) rethrow;
+    // Tre trasporti, dal piu' economico al piu' robusto:
+    //   1. rete diretta;
+    //   2. rete diretta con DNS-over-HTTPS e IP vero (aggira il DNS del gestore);
+    //   3. Worker Cloudflare (aggira il blocco IP/SNI, es. Piracy Shield su dati
+    //      mobili). Si tenta solo se configurato in fase di build.
+    // Un fallimento "non ritentabile" (episodio inesistente, indirizzo non
+    // riconosciuto) ferma subito: cambiare strada non lo risolverebbe.
+    final attempts = <({HttpClient client, Uri? relay})>[
+      (client: _http, relay: null),
+      (client: _bypassHttp, relay: null),
+      if (_relay != null) (client: _http, relay: _relay),
+    ];
 
-      _session = null;
-      _sessionExpiresAt = null;
-
-      // Secondo giro con il client "anti-blocco". Alcune reti — tipicamente i
-      // dati mobili italiani — intercettano il DNS della fonte e rispondono con
-      // una pagina di blocco: la connessione fallisce subito e il player mostra
-      // "le fonti non si risolvono", anche se dal Wi-Fi lo stesso episodio
-      // parte. Qui si risolve l'indirizzo con DNS-over-HTTPS (che il gestore
-      // non vede) e ci si collega direttamente, tenendo l'SNI giusto perche' il
-      // certificato resti valido. Se anche cosi' non passa, si rilancia
-      // l'errore originale: il player passa alla fonte successiva come prima.
+    ClientExtractionFailure? failure;
+    for (final attempt in attempts) {
       try {
         return await _extract(
-          client: _bypassHttp,
+          client: attempt.client,
+          relay: attempt.relay,
           sourceId: sourceId,
           canonicalUrl: canonicalUrl,
           episodeNumber: episodeNumber,
           quality: quality,
           providerSlug: providerSlug,
         );
-      } on ClientExtractionFailure {
-        _session = null;
-        _sessionExpiresAt = null;
+      } on ClientExtractionFailure catch (e) {
+        failure = e;
+
+        // La sessione di quel trasporto puo' essere ormai rifiutata: si butta,
+        // cosi' il tentativo successivo (o quello dopo, dal player) ne compra
+        // una nuova invece di ripetere lo stesso errore. Su un errore non
+        // ritentabile ci si ferma: la sessione non c'entra con un episodio
+        // inesistente.
+        if (attempt.relay == null) {
+          _session = null;
+          _sessionExpiresAt = null;
+        } else {
+          _relaySession = null;
+          _relaySessionExpiresAt = null;
+        }
+        if (!e.isRetryable) rethrow;
       }
-      rethrow;
     }
+
+    throw failure ??
+        const ClientExtractionFailure('AnimeUnity non raggiungibile.');
   }
 
   /// Quanti episodi ha AnimeUnity adesso.
@@ -174,20 +195,32 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final animeId = _parseAnimeId(canonicalUrl);
     if (animeId == null) return null;
 
-    final session = await _getSession(_http);
     final uri = Uri.parse('$_base/info_api/$animeId/1').replace(
       queryParameters: {'start_range': '1', 'end_range': '1'},
     );
 
-    final info = await _apiJson(_http, uri, _apiHeaders(session));
-    final raw = info['episodes_count'];
-    if (raw is num) return raw.toInt();
-    if (raw is String) return int.tryParse(raw);
+    // Best-effort: si prova la rete diretta e, se configurato, il Worker. Un
+    // conteggio mancante non cambia cio' che l'utente vede, quindi qui non
+    // solleva mai.
+    for (final relay in <Uri?>[null, if (_relay != null) _relay]) {
+      try {
+        final session = await _getSession(_http, relay: relay);
+        final info =
+            await _apiJson(_http, uri, _apiHeaders(session), relay: relay);
+        final raw = info['episodes_count'];
+        if (raw is num) return raw.toInt();
+        if (raw is String) return int.tryParse(raw);
+        return null;
+      } catch (_) {
+        // Trasporto non disponibile: si prova il successivo.
+      }
+    }
     return null;
   }
 
   Future<ResolvedSource> _extract({
     required HttpClient client,
+    Uri? relay,
     required String sourceId,
     required String canonicalUrl,
     required int episodeNumber,
@@ -208,7 +241,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
 
     final wanted = _requestedQuality(quality);
 
-    final session = await _getSession(client);
+    final session = await _getSession(client, relay: relay);
 
     final infoUri = Uri.parse('$_base/info_api/$animeId/$episodeNumber').replace(
       queryParameters: {
@@ -217,7 +250,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       },
     );
 
-    final info = await _apiJson(client, infoUri, _apiHeaders(session));
+    final info = await _apiJson(client, infoUri, _apiHeaders(session), relay: relay);
     final episodes = info['episodes'];
     final list = episodes is List ? episodes : const [];
 
@@ -253,6 +286,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         'accept': 'text/plain',
         'referer': animePage,
       },
+      relay: relay,
     );
     if (embedResponse.status != 200) {
       throw ClientExtractionFailure(
@@ -303,9 +337,10 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   // Sessione e chiamate
   // -------------------------------------------------------------------------
 
-  Future<_Session> _getSession(HttpClient client) async {
-    final cached = _session;
-    final expiresAt = _sessionExpiresAt;
+  Future<_Session> _getSession(HttpClient client, {Uri? relay}) async {
+    final cached = relay == null ? _session : _relaySession;
+    final expiresAt =
+        relay == null ? _sessionExpiresAt : _relaySessionExpiresAt;
     if (cached != null && expiresAt != null && DateTime.now().isBefore(expiresAt)) {
       return cached;
     }
@@ -315,6 +350,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       'GET',
       Uri.parse('$_base/'),
       headers: {'user-agent': _userAgent, 'accept': 'text/html'},
+      relay: relay,
     );
     if (response.status != 200) {
       throw ClientExtractionFailure(
@@ -341,9 +377,15 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
           'AnimeUnity non ha rilasciato il token CSRF.');
     }
 
-    _session = _Session(cookie, token);
-    _sessionExpiresAt = DateTime.now().add(_sessionTtl);
-    return _session!;
+    final session = _Session(cookie, token);
+    if (relay == null) {
+      _session = session;
+      _sessionExpiresAt = DateTime.now().add(_sessionTtl);
+    } else {
+      _relaySession = session;
+      _relaySessionExpiresAt = DateTime.now().add(_sessionTtl);
+    }
+    return session;
   }
 
   Map<String, String> _apiHeaders(_Session session) => {
@@ -359,17 +401,25 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     Uri uri,
     Map<String, String> headers, {
     bool retried = false,
+    Uri? relay,
   }) async {
-    final response = await _send(client, 'GET', uri, headers: headers);
+    final response =
+        await _send(client, 'GET', uri, headers: headers, relay: relay);
 
     // 419: la sessione non vale piu'. Se ne compra una nuova e si rifa' la
     // richiesta una volta sola — insistere all'infinito su una sessione che il
     // server continua a rifiutare nasconderebbe un problema vero.
     if (response.status == 419 && !retried) {
-      _session = null;
-      _sessionExpiresAt = null;
-      final fresh = await _getSession(client);
-      return _apiJson(client, uri, _apiHeaders(fresh), retried: true);
+      if (relay == null) {
+        _session = null;
+        _sessionExpiresAt = null;
+      } else {
+        _relaySession = null;
+        _relaySessionExpiresAt = null;
+      }
+      final fresh = await _getSession(client, relay: relay);
+      return _apiJson(client, uri, _apiHeaders(fresh),
+          retried: true, relay: relay);
     }
 
     if (response.status != 200) {
@@ -388,14 +438,33 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         'AnimeUnity ha risposto con dati non leggibili.');
   }
 
+  /// L'indirizzo del Worker per una richiesta ad AnimeUnity.
+  ///
+  /// Il Worker espone `?u=<indirizzo completo>`: la query del bersaglio viaggia
+  /// dentro `u`, quindi l'URL finale resta valido anche quando l'originale ne
+  /// aveva una (es. `info_api/...?start_range=1`).
+  static Uri _withRelay(Uri relay, Uri target) => relay.replace(
+        queryParameters: {
+          ...relay.queryParameters,
+          'u': target.toString(),
+        },
+      );
+
   Future<_HttpResult> _send(
     HttpClient client,
     String method,
     Uri uri, {
     Map<String, String> headers = const {},
+    Uri? relay,
   }) async {
+    // Solo le richieste ad AnimeUnity passano dal Worker: il player (vixcloud,
+    // vix-content) non e' bloccato e va lasciato sulla rete diretta, che e'
+    // piu' veloce.
+    final viaRelay = relay != null && uri.host.contains('animeunity');
+    final target = viaRelay ? _withRelay(relay, uri) : uri;
+
     try {
-      final request = await client.openUrl(method, uri);
+      final request = await client.openUrl(method, target);
       headers.forEach(request.headers.set);
       final response = await request.close().timeout(const Duration(seconds: 20));
       final body = await response.transform(utf8.decoder).join();
@@ -405,13 +474,33 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         if (name.toLowerCase() == 'set-cookie') setCookies.addAll(values);
       });
 
+      // Dietro il Worker i `Set-Cookie` non possono viaggiare come header
+      // normali (il browser/app li leggerebbe di un altro dominio): il Worker li
+      // rimette nel header `x-set-cookie` come lista JSON.
+      if (viaRelay) {
+        final rawCookies = response.headers.value('x-set-cookie');
+        if (rawCookies != null && rawCookies.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(rawCookies);
+            if (decoded is List) {
+              for (final entry in decoded) {
+                if (entry is String) setCookies.add(entry);
+              }
+            }
+          } on FormatException {
+            // Header illeggibile: senza cookie si compra una sessione nuova al
+            // giro dopo, quindi non vale far fallire questa richiesta.
+          }
+        }
+      }
+
       return _HttpResult(response.statusCode, body, setCookies);
     } on TimeoutException {
       throw const ClientExtractionFailure('AnimeUnity non risponde. Riprova.');
     } on HandshakeException {
       // Tipico di una rete che intercetta la fonte: la connessione arriva a un
       // server che non ha il certificato giusto. Ritentabile, perche' il giro
-      // con il DNS-over-HTTPS puo' aggirarla.
+      // con il DNS-over-HTTPS — o quello via Worker — puo' aggirarla.
       throw const ClientExtractionFailure(
           'Connessione sicura ad AnimeUnity non riuscita. Riprova.');
     } on SocketException {

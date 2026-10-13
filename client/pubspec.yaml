@@ -1,7 +1,7 @@
 name: animerank
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.0.13+13
+version: 0.0.14+14
 
 environment:
   sdk: ^3.13.4
@@ -12,6 +12,7 @@ dependencies:
   fl_chart: ^1.2.0
   flutter:
     sdk: flutter
+  flutter_cache_manager: ^3.4.5
   flutter_riverpod: ^3.4.3
   flutter_secure_storage: ^11.2.0
   go_router: ^18.0.2

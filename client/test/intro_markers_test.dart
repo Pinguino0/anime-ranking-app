@@ -16,11 +16,8 @@ void main() {
       expect(intro.isActive(const Duration(seconds: 120)), isFalse);
     });
 
-    test('legge la finestra da una riga del catalogo', () {
-      final intro = IntroMarkers.fromRow({
-        'intro_start_seconds': 12,
-        'intro_end_seconds': 102,
-      });
+    test('legge la finestra dalla risposta della funzione', () {
+      final intro = IntroMarkers.fromWindow(12, 102);
 
       expect(intro, isNotNull);
       expect(intro!.start, const Duration(seconds: 12));
@@ -28,15 +25,9 @@ void main() {
     });
 
     test('una finestra incompleta o invertita vale come assente', () {
-      expect(IntroMarkers.fromRow(const {}), isNull);
-      expect(IntroMarkers.fromRow(const {'intro_start_seconds': 10}), isNull);
-      expect(
-        IntroMarkers.fromRow(const {
-          'intro_start_seconds': 90,
-          'intro_end_seconds': 90,
-        }),
-        isNull,
-      );
+      expect(IntroMarkers.fromWindow(null, null), isNull);
+      expect(IntroMarkers.fromWindow(10, null), isNull);
+      expect(IntroMarkers.fromWindow(90, 90), isNull);
     });
   });
 }

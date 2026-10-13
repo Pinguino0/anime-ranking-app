@@ -48,6 +48,7 @@ jobs:
           flutter build ios --release --no-codesign
           --dart-define=SUPABASE_URL=https://sjbstiexythmapxmrfyp.supabase.co
           --dart-define=SUPABASE_ANON_KEY=sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc
+          --dart-define=ANIMERANK_RELAY=https://animerank-relay.titanoeren171.workers.dev
 
       - name: Impacchetta l'IPA
         id: package

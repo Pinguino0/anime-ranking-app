@@ -42,6 +42,7 @@ import 'features/tournaments/presentation/tournaments_controller.dart';
 import 'features/update/data/app_release_repository.dart';
 import 'features/update/data/install_permission.dart';
 import 'features/update/data/update_background_task.dart';
+import 'features/update/data/update_cleanup.dart';
 import 'features/watchlist/data/watchlist_repository.dart';
 import 'features/watchlist/presentation/watchlist_controller.dart';
 
@@ -203,6 +204,12 @@ Future<void> main() async {
   // servizio e non deve bloccare l'avvio.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(bootstrapUpdateMaintenance());
+
+    // Gli APK degli aggiornamenti passati li butta gia' il task periodico, ma
+    // fino a una volta a settimana: chi apre l'app spesso non aspetta il giro
+    // del WorkManager. Qui si ripulisce a ogni avvio, che e' quando gli APK
+    // lasciati dall'ultimo aggiornamento non servono piu' a nessuno.
+    unawaited(deleteLeftoverUpdateApks());
 
     // Avvia il servizio push: registra il token dell'utente collegato e resta
     // in ascolto dei messaggi. Dopo il primo frame perche' un tap su una

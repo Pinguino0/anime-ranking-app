@@ -13,6 +13,7 @@ import '../../../core/ui/transitions.dart';
 import '../../auth/presentation/auth_controller.dart';
 import '../../episodes/presentation/episode_sync_controller.dart';
 import '../../groups/presentation/groups_controller.dart';
+import '../../history/presentation/history_controller.dart';
 import '../../home/screens/home_screen.dart';
 import 'widgets/shell_chrome.dart';
 
@@ -472,10 +473,12 @@ String? _sectionRouteFor(List<_NavSection> sections, String location) {
 /// caroselli. Le sezioni per gruppo restano raggiungibili dalla barra e dalla
 /// sidebar, quindi elencarle di nuovo qui era solo un doppione.
 ///
-/// La riga di benvenuto pero' resta, perche' serve a un caso preciso: un
-/// account nuovo non ha gruppi, quindi tutte le sezioni rimanderebbero al
-/// selettore vuoto. Una riga che dice cosa fare vale piu' di una griglia di
-/// locandine che non spiega ancora niente.
+/// La schermata di benvenuto resta per un caso preciso: un account davvero
+/// vuoto, senza gruppi e senza niente da riprendere, a cui tutte le sezioni
+/// rimanderebbero al selettore vuoto. Per tutti gli altri c'e' la home, anche
+/// senza gruppi: "Continua da guardare" e' personale e non dipende da nessun
+/// gruppo, e chi guardava episodi senza averne creato uno la perdeva insieme
+/// alla benvenuta.
 class ShellHomeBody extends ConsumerWidget {
   const ShellHomeBody({this.email, super.key});
 
@@ -483,10 +486,9 @@ class ShellHomeBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // `orElse: () => true` e' deliberato: mentre l'elenco gruppi non e'
-    // ancora arrivato si mostra la home. Il dubbio ("avrà un gruppo?") non
-    // merita di costringere l'utente ad aspettare, e se la lista arriva vuota
-    // la schermata di benvenuto corregge la rotta.
+    // Finche' l'elenco gruppi non e' arrivato si dice "nessun gruppo": e' il
+    // caso che porta alla benvenuta, e mostrarla per un istante a chi ha gruppi
+    // e' meno fastidioso del contrario (la home che compare e sparisce).
     final hasGroups = ref
         .watch(groupsListProvider)
         .maybeWhen(
@@ -495,7 +497,13 @@ class ShellHomeBody extends ConsumerWidget {
           orElse: () => false,
         );
 
-    if (hasGroups) return const HomeScreen();
+    // Basta un episodio lasciato a meta': la riga "Continua da guardare" e'
+    // l'unica cosa che un utente senza gruppi puo' fare subito nella home.
+    final hasProgress =
+        (ref.watch(continueWatchingProvider).asData?.value ?? const [])
+            .isNotEmpty;
+
+    if (hasGroups || hasProgress) return const HomeScreen();
 
     return const _FirstRunWelcome();
   }

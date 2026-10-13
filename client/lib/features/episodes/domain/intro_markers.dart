@@ -26,16 +26,17 @@ class IntroMarkers {
   bool isActive(Duration position) =>
       position >= start && position < end - _tail;
 
-  /// Legge la finestra da una riga di `public.anime`.
+  /// Legge la finestra da una coppia di secondi, come li restituisce
+  /// `anime-intro`.
   ///
-  /// Restituisce `null` se una delle due colonne manca o se la fine non segue
+  /// Restituisce `null` se uno dei due estremi manca o se la fine non segue
   /// l'inizio: una sigla con un solo estremo non e' una finestra, e usarla per
   /// meta' salterebbe alla cieca.
-  static IntroMarkers? fromRow(Map<String, dynamic> row) {
-    final start = _seconds(row['intro_start_seconds']);
-    final end = _seconds(row['intro_end_seconds']);
-    if (start == null || end == null || end <= start) return null;
-    return IntroMarkers(start: start, end: end);
+  static IntroMarkers? fromWindow(Object? start, Object? end) {
+    final from = _seconds(start);
+    final to = _seconds(end);
+    if (from == null || to == null || to <= from) return null;
+    return IntroMarkers(start: from, end: to);
   }
 
   static Duration? _seconds(Object? value) {

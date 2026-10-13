@@ -33,6 +33,14 @@ abstract interface class AnimeRepository {
     int offset,
   });
 
+  /// Gli anime a cui sono stati aggiunti episodi per ultimi.
+  ///
+  /// E' la sorgente della riga "Nuovi episodi": l'unica che sa cosa e' arrivato
+  /// adesso. Le altre righe ordinano per voto, popolarita' o data di uscita, e
+  /// nessuno di questi criteri si accorge che una puntata nuova e' appena stata
+  /// scritta in catalogo.
+  Future<List<AnimeEntry>> recentEpisodes({int limit});
+
   /// Cerca nel catalogo esterno passando dall'Edge Function, con scrittura in
   /// catalogo.
   ///
@@ -311,6 +319,27 @@ class SupabaseAnimeRepository implements AnimeRepository {
     } catch (_) {
       throw const AnimeFailure(
         'Novita\' non raggiungibili. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<List<AnimeEntry>> recentEpisodes({int limit = 20}) async {
+    try {
+      final rows = await _client.rpc(
+        'recent_episodes',
+        params: {'_limit': limit},
+      );
+
+      return [for (final row in _rows(rows)) AnimeEntry.parse(_map(row))];
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on AppFailure {
+      rethrow;
+    } catch (_) {
+      throw const AnimeFailure(
+        'Nuovi episodi non disponibili. Riprova.',
         isRetryable: true,
       );
     }

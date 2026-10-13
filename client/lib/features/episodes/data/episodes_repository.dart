@@ -74,11 +74,13 @@ abstract interface class EpisodesRepository {
   /// Secondi gia' guardati. `null` se non c'e' ancora nessuna riga.
   Future<int?> progress(String episodeId);
 
-  /// La sigla dell'anime, se il catalogo la conosce.
+  /// La sigla di un episodio, se si conosce.
   ///
   /// `null` quando il dato non c'e': il player non mostra il pulsante "Salta
   /// intro" invece di inventare una finestra che taglierebbe contenuto vero.
-  Future<IntroMarkers?> introFor(String animeId);
+  /// La finestra cambia da episodio a episodio (il primo spesso non ha sigla),
+  /// quindi va chiesta per episodio e non per anime.
+  Future<IntroMarkers?> introFor(String animeId, int episode);
 }
 
 class SupabaseEpisodesRepository implements EpisodesRepository {
@@ -391,27 +393,29 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
   }
 
   @override
-  Future<IntroMarkers?> introFor(String animeId) async {
+  Future<IntroMarkers?> introFor(String animeId, int episode) async {
     try {
-      final rows = await _client
-          .from('anime')
-          .select('intro_start_seconds, intro_end_seconds')
-          .eq('id', animeId)
-          .limit(1);
-
-      final first = _rows(rows).firstOrNull;
-      if (first == null) return null;
-
-      return IntroMarkers.fromRow(_map(first));
-    } on PostgrestException catch (e) {
-      throw _translate(e);
-    } on EpisodesFailure {
-      rethrow;
-    } catch (_) {
-      throw const EpisodesFailure(
-        'Sigla non leggibile.',
-        isRetryable: true,
+      // Non si legge dal catalogo: la finestra non e' una colonna di `anime`
+      // (la sigla cambia da episodio a episodio) e l'id MyAnimeList, che
+      // AniSkip vuole, va risolto interrogando AniList. Lo fa la Edge Function,
+      // che tiene anche la cache.
+      final response = await _client.functions.invoke(
+        AppConfig.animeIntroFunction,
+        body: {'anime_id': animeId, 'episode': episode},
       );
+
+      final data = response.data;
+      if (data is! Map) return null;
+
+      final map = Map<String, dynamic>.from(data);
+      if (map['found'] != true) return null;
+
+      return IntroMarkers.fromWindow(map['start'], map['end']);
+    } catch (_) {
+      // La sigla e' un di piu': non c'e' una schermata da mostrare per un errore
+      // qui. Si risponde "non lo so" e il pulsante semplicemente non compare,
+      // invece di far fallire l'apertura del player per una cosa accessoria.
+      return null;
     }
   }
 
