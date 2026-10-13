@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../watchlist/domain/watchlist.dart';
+import '../../watchlist/presentation/watchlist_controller.dart';
 import 'episodes_controller.dart';
 
 /// Riallineamento degli episodi col provider.
@@ -67,6 +69,68 @@ class EpisodeSyncController {
     var added = 0;
 
     for (final id in animeIds.toSet().take(max)) {
+      added += await syncAnime(id);
+    }
+
+    return added;
+  }
+
+  /// Quanti anime si rileggono in un giro d'insieme.
+  ///
+  /// Piu' degli otto del primo taglio, ma non tutti: con una lista lunga un
+  /// riallineamento completo sarebbe una raffica, e AnimeUnity risponde con un
+  /// blocco. Il taglio cade su cio' che si tocca di rado (vedi [syncWatchlist]).
+  static const int budget = 15;
+
+  /// Un giro d'insieme per sessione: l'avvio dell'app e l'apertura della lista
+  /// non devono raddoppiare le richieste.
+  bool _swept = false;
+
+  /// Riallinea gli anime aperti della lista personale, in onda per primi.
+  ///
+  /// E' il giro che parte all'avvio dell'app: la lista personale e' l'unica
+  /// sorgente comoda, e l'ordine non e' casuale —
+  ///
+  ///  - **In onda per primi.** Sono gli unici che possono aver guadagnato un
+  ///    episodio da ieri a oggi; un'opera conclusa non cambia mai.
+  ///  - **Poi i piu' recenti.** La lista arriva ordinata per ultima modifica,
+  ///    quindi il tetto di [budget] taglia sempre in fondo cio' che l'utente
+  ///    tocca di rado.
+  ///
+  /// Best effort come [syncAnime]: non solleva, e restituisce quanti episodi ha
+  /// aggiunto. [force] serve al gesto manuale, che vuole rifare il giro anche
+  /// se la sessione l'ha gia' fatto.
+  Future<int> syncWatchlist({
+    bool force = false,
+    List<WatchlistEntry>? entries,
+  }) async {
+    if (_swept && !force) return 0;
+    _swept = true;
+
+    // Chi ha gia' le voci le passa, cosi' non si rifa' la stessa richiesta.
+    final List<WatchlistEntry> rows;
+    if (entries != null) {
+      rows = entries;
+    } else {
+      try {
+        rows = await _ref.read(watchlistRepositoryProvider).personalEntries();
+      } catch (_) {
+        return 0;
+      }
+    }
+
+    final airing = <String>[];
+    final rest = <String>[];
+    for (final entry in rows) {
+      if (entry.status == WatchStatus.completed ||
+          entry.status == WatchStatus.dropped) {
+        continue;
+      }
+      (entry.airing ? airing : rest).add(entry.animeId);
+    }
+
+    var added = 0;
+    for (final id in [...airing, ...rest].take(budget)) {
       added += await syncAnime(id);
     }
 

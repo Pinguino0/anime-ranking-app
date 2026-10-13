@@ -8,11 +8,13 @@ import 'package:animerank/features/episodes/presentation/screens/episode_screen.
 import 'package:animerank/features/episodes/presentation/widgets/episode_player.dart';
 import 'package:animerank/features/episodes/presentation/widgets/episode_rating_bar.dart';
 import 'package:animerank/features/episodes/presentation/widgets/episode_tile.dart';
+import 'package:animerank/features/watchlist/domain/watchlist.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'helpers/fake_episodes.dart';
+import 'helpers/fake_watchlist.dart';
 
 /// Schermata di visione con il repository finto.
 ///
@@ -1073,6 +1075,41 @@ void main() {
       await container.read(episodeSyncProvider).syncFollowed(['a', 'a', 'b']);
 
       expect(repository.syncCalls, ['a', 'b']);
+    });
+
+    test('il giro d\'insieme mette in onda per primi e salta i chiusi', () async {
+      // L'ordine e' il punto: le opere in onda sono le uniche che possono
+      // aver guadagnato un episodio, quindi vanno davanti a quelle ferme.
+      final repository = FakeEpisodesRepository();
+      final container = makeContainer(repository);
+
+      final added = await container.read(episodeSyncProvider).syncWatchlist(
+            entries: [
+              buildWatchlistEntry(animeId: 'ferma'),
+              buildWatchlistEntry(animeId: 'chiuso', status: WatchStatus.completed),
+              buildWatchlistEntry(animeId: 'droppato', status: WatchStatus.dropped),
+              buildWatchlistEntry(animeId: 'aria-a', airing: true),
+              buildWatchlistEntry(animeId: 'aria-b', airing: true),
+            ],
+          );
+
+      expect(repository.syncCalls, ['aria-a', 'aria-b', 'ferma']);
+      expect(added, 0);
+    });
+
+    test('il giro d\'insieme si fa una volta per sessione', () async {
+      final repository = FakeEpisodesRepository();
+      final container = makeContainer(repository);
+      final entries = [buildWatchlistEntry(animeId: 'anime-1')];
+
+      await container.read(episodeSyncProvider).syncWatchlist(entries: entries);
+      final afterFirst = repository.syncCalls.length;
+
+      // L'avvio dell'app e l'apertura della lista non devono raddoppiare le
+      // richieste: il secondo giro si ferma da solo.
+      await container.read(episodeSyncProvider).syncWatchlist(entries: entries);
+
+      expect(repository.syncCalls.length, afterFirst);
     });
   });
 }

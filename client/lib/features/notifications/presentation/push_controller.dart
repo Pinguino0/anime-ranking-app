@@ -153,11 +153,24 @@ class PushController {
 
   /// Apre la schermata giusta al tocco della notifica.
   ///
+  /// Un "nuovo episodio" porta subito all'episodio annunciato: e' l'unica cosa
+  /// utile che l'utente puo' fare con quell'avviso, e il numero viaggia nel link
+  /// proprio per aprirlo davvero invece del primo.
+  ///
   /// Un consiglio porta al gruppo che l'ha mandato, dove l'opera compare nella
   /// sezione "Consigliati dal gruppo". Senza gruppo (o con un payload inatteso)
   /// si va alla home: meglio una schermata sensata che una vuota.
   void _open(PushMessage message) {
     final router = _ref.read(appRouterProvider);
+
+    if (message.type == 'new_episode') {
+      final animeId = message.animeId;
+      if (animeId != null) {
+        router.go(AppRoutes.latestEpisode(animeId, message.episodeNumber));
+        return;
+      }
+    }
+
     final groupId = message.groupId;
     router.go(groupId == null ? AppRoutes.home : AppRoutes.watchlist(groupId));
   }

@@ -53,17 +53,10 @@ class _MyListScreenState extends ConsumerState<MyListScreen> {
     if (entries == null) return;
     _synced = true;
 
-    // Solo gli anime ancora aperti: un'opera completata o droppata non riceve
-    // episodi nuovi, e rileggerla sarebbe una richiesta per niente.
-    final ids = [
-      for (final entry in entries)
-        if (entry.status != WatchStatus.completed &&
-            entry.status != WatchStatus.dropped)
-          entry.animeId,
-    ];
-    if (ids.isEmpty) return;
-
-    unawaited(ref.read(episodeSyncProvider).syncFollowed(ids));
+    // Ordine e tetto li decide il controller (in onda per primi, poi i piu'
+    // recenti): qui si passa la lista che la schermata ha gia' caricato, cosi'
+    // non si rifa' la stessa richiesta.
+    unawaited(ref.read(episodeSyncProvider).syncWatchlist(entries: entries));
   }
 
   @override
@@ -79,8 +72,11 @@ class _MyListScreenState extends ConsumerState<MyListScreen> {
             tooltip: 'Aggiorna',
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
-              // A mano si vuole anche l'ultimo episodio, non solo le voci.
+              // A mano si vuole anche l'ultimo episodio, non solo le voci: il
+              // giro d'insieme si forza perche' la sessione potrebbe averlo
+              // gia' fatto all'avvio.
               _synced = false;
+              unawaited(ref.read(episodeSyncProvider).syncWatchlist(force: true));
               ref.read(myListProvider.notifier).refresh();
             },
           ),

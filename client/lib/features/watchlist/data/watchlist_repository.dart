@@ -51,6 +51,13 @@ abstract interface class WatchlistRepository {
   /// Totali della watchlist di gruppo, per le cifre in cima alla schermata.
   Future<WatchlistTotals> totals(String groupId);
 
+  /// Statistiche personali complessive, da `personal_overview`.
+  ///
+  /// Come [totals], ma senza gruppo: unisce tutti i gruppi in cui l'utente ha
+  /// qualcosa con la sua lista personale, contando una volta sola un'opera che
+  /// compare in piu' liste. E' il quadro che il profilo mostra.
+  Future<WatchlistTotals> overview();
+
   /// Cambia lo stato di un anime, creandolo se non era in watchlist.
   ///
   /// `groupId == null` scrive nella watchlist personale, altrimenti in quella
@@ -168,6 +175,25 @@ class SupabaseWatchlistRepository implements WatchlistRepository {
       if (result is List && result.isEmpty) {
         throw const WatchlistFailure('Non sei membro di questo gruppo.');
       }
+
+      final map = result is List ? result.first : result;
+      if (map is! Map) {
+        throw const WatchlistFailure('Statistiche non riconosciute.');
+      }
+
+      return WatchlistTotals.parse(Map<String, dynamic>.from(map));
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } catch (e) {
+      if (e is WatchlistFailure) rethrow;
+      throw const WatchlistFailure('Statistiche non disponibili. Riprova.', isRetryable: true);
+    }
+  }
+
+  @override
+  Future<WatchlistTotals> overview() async {
+    try {
+      final result = await _client.rpc('personal_overview');
 
       final map = result is List ? result.first : result;
       if (map is! Map) {

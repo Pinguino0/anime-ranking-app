@@ -806,6 +806,10 @@ class WatchlistRow extends StatelessWidget {
             child: Row(
               children: [
                 _StatusChip(entry: entry, groupId: groupId),
+                if (entry.unwatchedEpisodes != null) ...[
+                  const SizedBox(width: ArSpace.xs),
+                  _NewEpisodesBadge(count: entry.unwatchedEpisodes!),
+                ],
                 const Spacer(),
                 _EpisodeButton(entry: entry, groupId: groupId),
               ],
@@ -1036,6 +1040,50 @@ class _AnimeLine extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Pastiglia "episodi nuovi" della riga.
+///
+/// Dice a colpo d'occhio che il catalogo e' andato avanti rispetto al
+/// segnaposto dell'utente: e' il motivo per cui si tiene una watchlist, e senza
+/// un segno bisognerebbe leggere "5 / 12" per accorgersene.
+class _NewEpisodesBadge extends StatelessWidget {
+  const _NewEpisodesBadge({required this.count});
+
+  /// Quante puntate sono uscite oltre a quelle segnate.
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: ArSpace.xs, vertical: 2),
+      decoration: BoxDecoration(
+        color: ArColors.primary.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(ArRadii.chip),
+        border: Border.all(color: ArColors.primary.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.fiber_new_rounded,
+            size: 14,
+            color: ArColors.primary,
+          ),
+          const SizedBox(width: 2),
+          Text(
+            count == 1 ? '1 nuovo' : '$count nuovi',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ArColors.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -32,6 +32,7 @@ class EpisodeScreen extends ConsumerStatefulWidget {
   const EpisodeScreen({
     required this.animeId,
     this.episodeId,
+    this.initialEpisodeNum,
     this.animeTitle,
     super.key,
   });
@@ -42,6 +43,13 @@ class EpisodeScreen extends ConsumerStatefulWidget {
 
   /// Episodio da aprire. `null` apre il primo disponibile.
   final String? episodeId;
+
+  /// Numero dell'episodio da aprire quando non c'e' un [episodeId].
+  ///
+  /// Arriva dal tap di una notifica "nuovo episodio", che conosce il numero ma
+  /// non l'id: la schermata apre quello, o l'ultimo disponibile se il catalogo
+  /// non lo conosce ancora.
+  final int? initialEpisodeNum;
 
   /// Nome dell'opera, per il titolo della pagina.
   final String? animeTitle;
@@ -223,10 +231,21 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
   /// vuota: la lista e' comunque li', e il vuoto sembrerebbe un bug.
   int _resolveIndex(List<Episode> episodes) {
     final wanted = widget.episodeId;
-    if (wanted == null) return 0;
+    if (wanted != null) {
+      final index = episodes.indexWhere((e) => e.id == wanted);
+      if (index >= 0) return index;
+    }
 
-    final index = episodes.indexWhere((e) => e.id == wanted);
-    return index < 0 ? 0 : index;
+    // Numero da notifica: la lista e' ordinata crescente, quindi si cerca
+    // l'episodio con quel numero; se il catalogo non lo conosce ancora si
+    // prende l'ultimo disponibile, che e' comunque la novita' piu' recente.
+    final number = widget.initialEpisodeNum;
+    if (number != null) {
+      final exact = episodes.indexWhere((e) => e.number == number);
+      return exact >= 0 ? exact : episodes.length - 1;
+    }
+
+    return 0;
   }
 
   void _openSheet(List<Episode> episodes, int current) {
@@ -650,7 +669,16 @@ class _TopBar extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
-            onPressed: () => context.pop(),
+            onPressed: () {
+              // Un tap su una notifica apre questa pagina con `go`, quindi la
+              // pila puo' essere vuota: senza il controllo il pulsante
+              // solleverebbe invece di riportare da qualche parte.
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go(AppRoutes.home);
+              }
+            },
             icon: const Icon(Icons.arrow_back_rounded),
             color: theme.colorScheme.onSurface,
             tooltip: 'Indietro',

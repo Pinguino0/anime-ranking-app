@@ -133,6 +133,20 @@ class WatchlistEntry {
   String get episodeLabel =>
       episodes == null ? '$currentEpisode' : '$currentEpisode / $episodes';
 
+  /// Quanti episodi sono usciti oltre a quelli segnati dall'utente.
+  ///
+  /// `null` quando non c'e' niente da segnalare: il totale non e' noto, l'anime
+  /// non e' ancora iniziato (`currentEpisode == 0`: non e' "un episodio nuovo"
+  /// di qualcosa che non si e' mai aperto) o l'utente e' gia' in pari. Il numero
+  /// e' la distanza dal proprio segnaposto, cioe' le puntate da recuperare.
+  int? get unwatchedEpisodes {
+    final total = episodes;
+    if (total == null || currentEpisode <= 0 || total <= currentEpisode) {
+      return null;
+    }
+    return total - currentEpisode;
+  }
+
   /// Dettagli secondari: stato in corso, anno, episodi.
   ///
   /// Uno solo per riga: in watchlist le righe sono gia lunghe (copertina,
@@ -273,6 +287,7 @@ class AnimeRecommendation {
 class WatchlistTotals {
   const WatchlistTotals({
     this.rated = 0,
+    this.meanScore = 0,
     this.entries = 0,
     this.watching = 0,
     this.completed = 0,
@@ -280,11 +295,16 @@ class WatchlistTotals {
     this.favorites = 0,
     this.episodes = 0,
     this.hours = 0,
+    this.topGenre,
+    this.topStudio,
   });
 
   /// Anime votati nel gruppo: voti e watchlist sono due elenchi diversi, e
   /// senza questo numero non si capisce quale dei due e pieno.
   final int rated;
+
+  /// Voto medio, su una scala 1-10. Zero quando non c'e' nessun voto.
+  final double meanScore;
 
   /// Anime in watchlist, qualsiasi stato.
   final int entries;
@@ -299,8 +319,14 @@ class WatchlistTotals {
   /// Stima delle ore, calcolata dal backend con 0.75 minuti per episodio.
   final double hours;
 
+  /// Genere e studio piu' ricorrenti, dai voti e dalla watchlist. `null`
+  /// quando non c'e' ancora niente da cui ricavarli.
+  final String? topGenre;
+  final String? topStudio;
+
   factory WatchlistTotals.parse(Map<String, dynamic> json) => WatchlistTotals(
         rated: _toInt(json['rated_count']) ?? 0,
+        meanScore: _toDouble(json['mean_score']) ?? 0,
         entries: _toInt(json['watched_count']) ?? 0,
         watching: _toInt(json['watching']) ?? 0,
         completed: _toInt(json['completed']) ?? 0,
@@ -308,23 +334,29 @@ class WatchlistTotals {
         favorites: _toInt(json['favorites']) ?? 0,
         episodes: _toInt(json['episodes_watched']) ?? 0,
         hours: _toDouble(json['estimated_hours']) ?? 0,
+        topGenre: _text(json['top_genre']),
+        topStudio: _text(json['top_studio']),
       );
 
   @override
   bool operator ==(Object other) =>
       other is WatchlistTotals &&
       other.rated == rated &&
+      other.meanScore == meanScore &&
       other.entries == entries &&
       other.watching == watching &&
       other.completed == completed &&
       other.dropped == dropped &&
       other.favorites == favorites &&
       other.episodes == episodes &&
-      other.hours == hours;
+      other.hours == hours &&
+      other.topGenre == topGenre &&
+      other.topStudio == topStudio;
 
   @override
   int get hashCode => Object.hash(
         rated,
+        meanScore,
         entries,
         watching,
         completed,
@@ -332,6 +364,8 @@ class WatchlistTotals {
         favorites,
         episodes,
         hours,
+        topGenre,
+        topStudio,
       );
 }
 

@@ -145,12 +145,41 @@ void main() {
 
       expect(entry.progress, 1);
     });
+
+    test('unwatchedEpisodes segnala solo le puntate oltre il segnaposto', () {
+      // Il caso che accende la pastiglia: ha iniziato e il catalogo e' andato
+      // avanti.
+      expect(
+        buildWatchlistEntry(currentEpisode: 5, episodes: 12).unwatchedEpisodes,
+        7,
+      );
+    });
+
+    test('unwatchedEpisodes tace se non c\'e\' niente da segnalare', () {
+      // Mai iniziato: non e' "un episodio nuovo" di qualcosa che non si e'
+      // aperto.
+      expect(
+        buildWatchlistEntry(currentEpisode: 0, episodes: 12).unwatchedEpisodes,
+        isNull,
+      );
+      // Gia' in pari.
+      expect(
+        buildWatchlistEntry(currentEpisode: 12, episodes: 12).unwatchedEpisodes,
+        isNull,
+      );
+      // Totale ignoto.
+      expect(
+        buildWatchlistEntry(currentEpisode: 5, episodes: null).unwatchedEpisodes,
+        isNull,
+      );
+    });
   });
 
   group('WatchlistTotals.parse', () {
     test('le cifre vengono da personal_stats', () {
       final totals = WatchlistTotals.parse({
         'rated_count': 12,
+        'mean_score': 7.5,
         'watched_count': 8,
         'watching': 3,
         'completed': 4,
@@ -158,15 +187,20 @@ void main() {
         'favorites': 5,
         'episodes_watched': 96,
         'estimated_hours': 72.0,
+        'top_genre': 'Action',
+        'top_studio': 'Bones',
       });
 
       expect(totals.rated, 12);
+      expect(totals.meanScore, 7.5);
       expect(totals.entries, 8);
       expect(totals.watching, 3);
       expect(totals.completed, 4);
       expect(totals.favorites, 5);
       expect(totals.episodes, 96);
       expect(totals.hours, 72);
+      expect(totals.topGenre, 'Action');
+      expect(totals.topStudio, 'Bones');
     });
 
     test('una risposta vuota vale come cifre a zero', () {

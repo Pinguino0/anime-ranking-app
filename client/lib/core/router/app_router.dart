@@ -151,6 +151,17 @@ class AppRoutes {
   /// Visione dell'opera con il primo episodio, dalla scheda anime.
   static String firstEpisode(String animeId) => '$animeSearch/$animeId/episode';
 
+  /// Visione dell'episodio annunciato da una notifica.
+  ///
+  /// Il numero viaggia come parametro di query e non in `extra`: il tap di un
+  /// push puo' avviare l'app da zero, e in quel caso `extra` non esisterebbe e
+  /// il numero andrebbe perso. `null` apre il primo episodio, che e' il
+  /// ripiego giusto quando la notifica non lo dichiara.
+  static String latestEpisode(String animeId, int? episodeNum) {
+    final base = firstEpisode(animeId);
+    return episodeNum == null ? base : '$base?num=$episodeNum';
+  }
+
   /// Rotte raggiungibili senza sessione.
   static const Set<String> public = {login, register};
 }
@@ -361,6 +372,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => EpisodeScreen(
                   animeId: state.pathParameters['animeId']!,
                   animeTitle: state.extra as String?,
+                  // Il numero arriva dai link delle notifiche (`?num=7`). Con
+                  // `null` resta il comportamento di sempre: primo episodio.
+                  initialEpisodeNum:
+                      int.tryParse(state.uri.queryParameters['num'] ?? ''),
                 ),
               ),
             ],

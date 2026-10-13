@@ -26,6 +26,25 @@ class PushMessage {
   /// Il gruppo da cui arriva il consiglio.
   String? get groupId => _text(data['group_id']);
 
+  /// Il tipo della notifica: `new_episode`, `anime_recommendation`, ...
+  ///
+  /// Arriva come campo a se' di `data` (il webhook lo scrive accanto al
+  /// payload), non dentro il `payload` serializzato.
+  String? get type => _text(data['type']);
+
+  /// Numero dell'episodio annunciato, se la notifica ne parla.
+  ///
+  /// Sul filo puo' arrivare come stringa (FCM accetta solo stringhe nei `data`
+  /// dell'Android, ma il payload JSON lo conserva numerico): qui si accettano
+  /// entrambi invece di far dipendere il tap dal trasporto.
+  int? get episodeNumber {
+    final raw = data['episode_num'];
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
   /// true se non c'e' niente da mostrare.
   bool get isEmpty => title.isEmpty && body.isEmpty;
 }

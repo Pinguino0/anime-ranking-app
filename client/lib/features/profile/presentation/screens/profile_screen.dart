@@ -14,6 +14,8 @@ import '../../../../core/ui/section_header.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../../auth/presentation/auth_controller.dart';
 import '../../../auth/presentation/widgets/auth_scaffold.dart';
+import '../../../watchlist/domain/watchlist.dart';
+import '../../../watchlist/presentation/watchlist_controller.dart';
 import '../../data/avatar_picker.dart';
 import '../../domain/user_profile.dart';
 import '../profile_controller.dart';
@@ -283,6 +285,11 @@ class _BodyState extends ConsumerState<_Body> {
       ),
     );
 
+    // Statistiche personali: subito sotto l'identita' e prima del resto, perche'
+    // sono il ritratto di quello che l'utente ha fatto. Si caricano a parte, con
+    // il loro provider: se non rispondono, nome e bio restano modificabili.
+    const statsSection = _StatsSection();
+
     final editSection = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -413,6 +420,8 @@ class _BodyState extends ConsumerState<_Body> {
                   children: [
                     hero,
                     const SizedBox(height: ArSpace.xl),
+                    statsSection,
+                    const SizedBox(height: ArSpace.xl),
                     sessionSection,
                   ],
                 ),
@@ -436,6 +445,8 @@ class _BodyState extends ConsumerState<_Body> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               hero,
+              const SizedBox(height: ArSpace.xl),
+              statsSection,
               const SizedBox(height: ArSpace.xl),
               ...feedback,
               editSection,
@@ -733,3 +744,188 @@ class _ActionRow extends StatelessWidget {
     );
   }
 }
+
+/// Statistiche personali del profilo.
+///
+/// Il quadro di tutto quello che l'utente ha guardato e votato — non di un
+/// gruppo solo — preso da `personal_overview`, che conta una volta sola un'opera
+/// presente in piu' liste. Si caricano a parte dal resto del profilo: un errore
+/// qui non deve impedire di cambiare nome o bio.
+class _StatsSection extends ConsumerWidget {
+  const _StatsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final overview = ref.watch(personalOverviewProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader(
+          title: 'Le tue statistiche',
+          subtitle: 'Tutto quello che hai guardato e votato, in ogni gruppo.',
+          padding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: ArSpace.sm),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: ArColors.containerLow,
+            borderRadius: BorderRadius.circular(ArRadii.card),
+            border: Border.all(color: ArColors.borderSoft),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(ArSpace.md),
+            child: overview.when(
+              loading: () => const _OverviewSkeleton(),
+              error: (_, _) => _OverviewError(
+                onRetry: () => ref.invalidate(personalOverviewProvider),
+              ),
+              data: (totals) => _OverviewGrid(totals: totals),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Le cifre, in una griglia che va a capo da sola.
+///
+/// `Wrap` e non `Row`: su un telefono stretto le voci scendono su piu' righe
+/// invece di stringersi fino a diventare illeggibili.
+class _OverviewGrid extends StatelessWidget {
+  const _OverviewGrid({required this.totals});
+
+  final WatchlistTotals totals;
+
+  @override
+  Widget build(BuildContext context) {
+    final genre = totals.topGenre;
+    final studio = totals.topStudio;
+
+    return Wrap(
+      spacing: ArSpace.lg,
+      runSpacing: ArSpace.md,
+      children: [
+        _OverviewStat(label: 'In watchlist', value: _thousands(totals.entries)),
+        _OverviewStat(label: 'In visione', value: _thousands(totals.watching)),
+        _OverviewStat(label: 'Completati', value: _thousands(totals.completed)),
+        _OverviewStat(label: 'Episodi', value: _thousands(totals.episodes)),
+        _OverviewStat(label: 'Ore stimate', value: _formatHours(totals.hours)),
+        _OverviewStat(label: 'Voti', value: _thousands(totals.rated)),
+        _OverviewStat(label: 'Voto medio', value: _score(totals.meanScore)),
+        if (genre != null && genre.isNotEmpty)
+          _OverviewStat(label: 'Genere top', value: genre),
+        if (studio != null && studio.isNotEmpty)
+          _OverviewStat(label: 'Studio top', value: studio),
+      ],
+    );
+  }
+}
+
+/// Una cifra con la sua etichetta.
+class _OverviewStat extends StatelessWidget {
+  const _OverviewStat({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SizedBox(
+      width: 104,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: ArColors.textHigh,
+              fontVariations: const [FontVariation('wght', 700)],
+            ),
+          ),
+          const SizedBox(height: ArSpace.xxs),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ArColors.textLow,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OverviewSkeleton extends StatelessWidget {
+  const _OverviewSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: ArSpace.lg,
+      runSpacing: ArSpace.md,
+      children: const [
+        SkeletonBox(width: 104, height: 40, radius: ArRadii.chip),
+        SkeletonBox(width: 104, height: 40, radius: ArRadii.chip),
+        SkeletonBox(width: 104, height: 40, radius: ArRadii.chip),
+      ],
+    );
+  }
+}
+
+class _OverviewError extends StatelessWidget {
+  const _OverviewError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        const Icon(Icons.cloud_off_rounded, size: 20, color: ArColors.textLow),
+        const SizedBox(width: ArSpace.sm),
+        Expanded(
+          child: Text(
+            'Statistiche non disponibili.',
+            style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textLow),
+          ),
+        ),
+        TextButton(onPressed: onRetry, child: const Text('Riprova')),
+      ],
+    );
+  }
+}
+
+/// Separatore delle migliaia col punto, come nella striscia della watchlist.
+String _thousands(int value) {
+  final digits = value.abs().toString();
+  final buffer = StringBuffer(value < 0 ? '-' : '');
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write('.');
+    buffer.write(digits[i]);
+  }
+  return buffer.toString();
+}
+
+/// Ore stimate: un decimale sotto le cento, zero sopra. La virgola e' quella
+/// italiana, coerente col resto della pagina.
+String _formatHours(double hours) {
+  final rounded = hours < 100 ? hours.toStringAsFixed(1) : hours.toStringAsFixed(0);
+  return rounded.replaceAll('.', ',');
+}
+
+/// Voto medio su 1-10, con un decimale. Trattino quando non c'e' nessun voto:
+/// uno "0,0" sembrerebbe un giudizio, non un'assenza.
+String _score(double score) =>
+    score <= 0 ? '—' : score.toStringAsFixed(1).replaceAll('.', ',');

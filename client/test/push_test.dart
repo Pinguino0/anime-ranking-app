@@ -188,4 +188,48 @@ void main() {
 
     expect(router.routeInformationProvider.value.uri.toString(), '/');
   });
+
+  test('il tocco su un nuovo episodio apre l\'episodio annunciato', () async {
+    final messaging = FakePushMessaging();
+    final tokens = FakeDeviceTokenRepository();
+    final auth = FakeAuthRepository(session: buildSession());
+    addTearDown(messaging.dispose);
+    addTearDown(auth.dispose);
+
+    final router = GoRouter(
+      initialLocation: '/altro',
+      routes: [
+        GoRoute(path: '/', builder: (_, _) => const SizedBox()),
+        GoRoute(path: '/altro', builder: (_, _) => const SizedBox()),
+        GoRoute(
+          path: '/anime/:animeId/episode',
+          builder: (_, _) => const SizedBox(),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    containerWith(messaging: messaging, tokens: tokens, auth: auth, router: router)
+        .read(pushControllerProvider);
+    await settle();
+
+    messaging.emitOpened(
+      const PushMessage(
+        title: 'Nuovo episodio',
+        body: '',
+        data: {
+          'type': 'new_episode',
+          'anime_id': 'a-1',
+          'episode_num': 12,
+          'group_id': 'g-1',
+        },
+      ),
+    );
+    await settle();
+
+    expect(
+      router.routeInformationProvider.value.uri.toString(),
+      '/anime/a-1/episode?num=12',
+    );
+  });
 }

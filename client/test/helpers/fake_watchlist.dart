@@ -40,6 +40,13 @@ class FakeWatchlistRepository implements WatchlistRepository {
 
   WatchlistTotals totalsResult = const WatchlistTotals();
 
+  /// Statistiche complessive restituite da [overview].
+  WatchlistTotals overviewResult = const WatchlistTotals();
+
+  WatchlistFailure? overviewFailure;
+
+  int overviewCalls = 0;
+
   /// Consigli restituiti da [recommendations], per gruppo.
   List<AnimeRecommendation> recommendationsResult = [];
 
@@ -79,6 +86,14 @@ class FakeWatchlistRepository implements WatchlistRepository {
     if (failure != null) throw failure;
 
     return totalsResult;
+  }
+
+  @override
+  Future<WatchlistTotals> overview() async {
+    overviewCalls++;
+    final failure = overviewFailure;
+    if (failure != null) throw failure;
+    return overviewResult;
   }
 
   @override

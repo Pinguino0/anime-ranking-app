@@ -60,6 +60,17 @@ final watchlistTotalsProvider =
   retry: appRetry,
 );
 
+/// Statistiche personali complessive, per il profilo.
+///
+/// Non e' una family — non dipende da un gruppo — e non e' un notifier perche'
+/// il profilo la sola legge: un [FutureProvider] basta e non aggiunge stato.
+/// Vive qui perche' parla la stessa lingua di [WatchlistTotals] e attinge alle
+/// stesse tabelle.
+final personalOverviewProvider = FutureProvider<WatchlistTotals>(
+  (ref) => ref.watch(watchlistRepositoryProvider).overview(),
+  retry: appRetry,
+);
+
 /// Consigli di visione registrati nel gruppo.
 ///
 /// Provider a parte dalla watchlist: i consigli sono un fatto distinto dalle

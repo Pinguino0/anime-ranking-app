@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,7 @@ import '../../../core/theme/section_accent.dart';
 import '../../../core/ui/ar_badge.dart';
 import '../../../core/ui/transitions.dart';
 import '../../auth/presentation/auth_controller.dart';
+import '../../episodes/presentation/episode_sync_controller.dart';
 import '../../groups/presentation/groups_controller.dart';
 import '../../home/screens/home_screen.dart';
 import 'widgets/shell_chrome.dart';
@@ -125,6 +128,17 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   /// Serve solo alla modalita' senza shell (test): la' la pagina aperta copre
   /// la barra e la sezione non e' deducibile dalla location, che non cambia.
   String? _lastRoute;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // All'avvio si chiede al provider gli episodi nuovi degli anime seguiti.
+    // E' il telefono a poterlo fare — AnimeUnity risponde 403 a un IP di
+    // datacenter — e da questa rilettura nascono le notifiche "nuovo episodio".
+    // In secondo piano: la home compare subito, e il giro e' uno per sessione.
+    unawaited(ref.read(episodeSyncProvider).syncWatchlist());
+  }
 
   /// Apre una sezione.
   ///

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/env/app_config.dart';
@@ -156,6 +158,24 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
 
   @override
   Future<ResolvedSource> resolveSource(String sourceId) async {
+    try {
+      final resolved = await _resolveSource(sourceId);
+
+      // Un successo cancellerebbe un voto vecchio: la fonte oggi funziona.
+      unawaited(_reportSourceResult(sourceId, ok: true));
+      return resolved;
+    } catch (_) {
+      // Il fallimento non ferma niente: il player passa alla fonte successiva.
+      // Questo e' solo il segnale che il catalogo raccoglie per spegnere le
+      // fonti morte (tre utenti diversi), quindi non deve mai rallentare ne'
+      // cambiare l'errore che risale.
+      unawaited(_reportSourceResult(sourceId, ok: false));
+      rethrow;
+    }
+  }
+
+  /// La risoluzione vera, senza il resoconto di salute.
+  Future<ResolvedSource> _resolveSource(String sourceId) async {
     // Il client manda solo l'id. L'indirizzo canonico e' riletto dal backend,
     // perche' se arrivasse da qui la funzione sarebbe un proxy aperto per
     // qualunque URL e non un resolver di fonti del catalogo: chi chiama
@@ -251,6 +271,22 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
       );
     } on ClientExtractionFailure catch (e) {
       throw SourceResolutionFailure(e.message, isRetryable: e.isRetryable);
+    }
+  }
+
+  /// Racconta al backend com'e' andata la risoluzione di una fonte.
+  ///
+  /// Best effort per costruzione: e' un'informazione sulla salute del catalogo,
+  /// non una parte della riproduzione. Un errore qui non deve arrivare
+  /// all'utente ne' allungare l'attesa, quindi si inghiotte in silenzio.
+  Future<void> _reportSourceResult(String sourceId, {required bool ok}) async {
+    try {
+      await _client.rpc(
+        'report_source_result',
+        params: {'_source_id': sourceId, '_ok': ok},
+      );
+    } catch (_) {
+      // Un resoconto perso non e' un problema.
     }
   }
 
