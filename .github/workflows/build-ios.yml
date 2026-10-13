@@ -1,0 +1,70 @@
+name: iOS IPA (sideload AltStore)
+run-name: iOS IPA
+
+# Costruisce un IPA NON firmato su un runner macOS.
+#
+# Perche' qui e non in locale: `flutter build ipa` richiede macOS e Xcode, e la
+# macchina di sviluppo e' Windows. Questo e' l'unico posto dove l'IPA puo'
+# nascere. La build e' volutamente senza firma (`--no-codesign`): AltStore
+# rifirma l'app sul dispositivo con l'Apple ID di chi la installa, quindi una
+# firma nostra non servirebbe e richiederebbe un account a pagamento.
+#
+# Download dell'artefatto: pagina del run (Actions -> iOS IPA -> Artifacts)
+# oppure `gh run download <id> -n animerank-ios-ipa`.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-ios
+  cancel-in-progress: false
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          cache: true
+
+      - name: Strumenti
+        run: |
+          flutter --version
+          xcodebuild -version
+          pod --version
+
+      - name: Dipendenze
+        run: flutter pub get
+
+      - name: Build iOS (release, senza firma)
+        run: >
+          flutter build ios --release --no-codesign
+          --dart-define=SUPABASE_URL=https://sjbstiexythmapxmrfyp.supabase.co
+          --dart-define=SUPABASE_ANON_KEY=sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc
+
+      - name: Impacchetta l'IPA
+        run: |
+          set -euo pipefail
+          APP="build/ios/iphoneos/Runner.app"
+          test -d "$APP"
+          rm -rf Payload animerank-0.0.12-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/Runner.app
+          zip -qry animerank-0.0.12-unsigned.ipa Payload
+          ls -lh animerank-0.0.12-unsigned.ipa
+          unzip -l animerank-0.0.12-unsigned.ipa | sed -n '1,10p'
+
+      - name: Carica l'artefatto
+        uses: actions/upload-artifact@v4
+        with:
+          name: animerank-ios-ipa
+          path: client/animerank-0.0.12-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
