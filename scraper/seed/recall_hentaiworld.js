@@ -216,12 +216,43 @@ function mediaFields(m) {
   return [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].filter(Boolean)
 }
 
+/// Parole che non distinguono un'opera dall'altra.
+///
+/// `cleaned` toglie tutto il non latino: di un titolo giapponese resta poco, e
+/// quel poco e' spesso un frammento comune. Senza questo filtro "... THE
+/// ANIMATION" combacia con "... THE ANIMATION" (Dice 1.0) e "SEX" con "SEX":
+/// falsi positivi trovati nella revisione, sempre con id AniList diversi.
+const GENERIC_WORDS = new Set([
+  'the', 'a', 'an', 'of', 'to', 'and', 'or', 'in', 'on', 'no', 'x', 'vs',
+  'ova', 'ona', 'tv', 'sp', 'special', 'specials', 'animation', 'movie',
+  'sub', 'eng', 'ita', 'sex',
+])
+
+/** I token di un titolo che valgono come indizio, non come rumore. */
+function comparatorTokens(value) {
+  return aw
+    .cleaned(value)
+    .toLowerCase()
+    .split(' ')
+    .map((w) => w.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ''))
+    .filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w))
+}
+
 /** Il miglior Dice fra due gruppi di titoli. */
 function bestDice(fieldsA, fieldsB) {
   let best = 0
   for (const a of fieldsA) {
+    const ta = comparatorTokens(a)
+    if (!ta.length) continue
+    const setA = new Set()
+    for (const w of ta) setA.add(w)
     for (const b of fieldsB) {
-      const d = aw.dice(aw.cleaned(a).toLowerCase(), aw.cleaned(b).toLowerCase())
+      const tb = comparatorTokens(b)
+      if (!tb.length) continue
+      let inter = 0
+      for (const w of new Set(tb)) if (setA.has(w)) inter += 1
+      if (inter === 0) continue
+      const d = (2 * inter) / (new Set([...ta, ...tb]).size + inter)
       if (d > best) best = d
     }
   }
@@ -344,17 +375,29 @@ async function main() {
   for (const hw of toSearch) {
     const term = searchTerm(hw.title)
     if (!term) continue
+    // Il ritardo serve a non martellare AniList: se la risposta e' gia' in
+    // cache non c'e' nessuna richiesta da rate-limitare, e un secondo giro
+    // (per esempio `--apply` dopo la revisione) scorre in pochi secondi.
+    const wasCached = aw.cleaned(term).toLowerCase() in cache
     const media = await searchAniList(term)
     searched += 1
     if (searched % 25 === 0) log(`  ${searched}/${toSearch.length} cercati`)
-    if (searched < toSearch.length) await sleep(DELAY_MS)
+    if (!wasCached && searched < toSearch.length) await sleep(DELAY_MS)
 
     let best = null
     for (const m of media ?? []) {
-      const strong = byAnilist.get(String(m.id)) ?? (m.idMal ? byMal.get(String(m.idMal)) : null)
+      const viaAnilist = byAnilist.get(String(m.id))
+      const strong =
+        viaAnilist ?? (m.idMal ? byMal.get(String(m.idMal)) : null)
       if (strong) {
         // Un id combacia: non serve altro.
-        best = { anime: strong, match: 'id', score: 1, media: m }
+        best = {
+          anime: strong,
+          match: 'id',
+          score: 1,
+          media: m,
+          via: viaAnilist ? 'anilist_id' : 'mal_id',
+        }
         break
       }
       // Secondo parere: il titolo AniList combacia con un anime del catalogo,
@@ -436,7 +479,10 @@ async function main() {
           provider_slug: PROVIDER_SLUG,
           provider_anime_id: p.hw.provider_anime_id,
           is_dub: false,
-          matched_by: 'anilist_recall',
+          // La colonna ha un CHECK: i valori ammessi sono anilist_id, mal_id,
+          // fuzzy_review, manual. Un id combaciato E' un match per id AniList o
+          // MAL; il secondo parere sul titolo resta fuzzy_review.
+          matched_by: p.match === 'id' ? p.via ?? 'anilist_id' : 'fuzzy_review',
           confidence: p.match === 'id' ? 1 : Number(p.score.toFixed(4)),
         })),
       ),

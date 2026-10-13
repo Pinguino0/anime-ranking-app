@@ -87,3 +87,7 @@ client/buildapp_log.txt
 # node_modules dello scraper: ricreabile con `npm install` in scraper/, non va
 # versionato. Gli script (animeunity.js, seed/*.js) invece servono alla CI.
 scraper/node_modules/
+# Le cache dei seed (es. recall_hentaiworld_cache.json) sono risposte gia' viste
+# da AniList: si rigenerano dal primo giro, e committarle aggiunge rumore che
+# nessuno rilegge.
+scraper/seed/*_cache.json
