@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/error/app_failure.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/section_accent.dart';
 import '../../../../core/ui/content_row.dart';
@@ -305,6 +306,41 @@ class _BodyState extends ConsumerState<_Body> {
       ],
     );
 
+    // Quello che l'utente ha fatto, non quello che puo' modificare: preferiti e
+    // cronologia stanno sopra le impostazioni perche' il profilo e' prima di
+    // tutto una vetrina di se stessi. Le voci che cambiano qualcosa (notifiche,
+    // obiettivi, sessione) stanno sotto.
+    final activitySection = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader(
+          title: 'La tua attivita',
+          padding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: ArSpace.sm),
+        _card(
+          padding: const EdgeInsets.symmetric(vertical: ArSpace.xs),
+          child: Column(
+            children: [
+              _ActionRow(
+                icon: Icons.star_border,
+                label: 'Preferiti',
+                value: 'Le opere che hai segnato con la stella',
+                onTap: () => context.push(AppRoutes.favorites),
+              ),
+              const Divider(height: 1, indent: ArSpace.md, endIndent: ArSpace.md),
+              _ActionRow(
+                icon: Icons.history,
+                label: 'Cronologia',
+                value: 'Gli episodi aperti, dal piu\' recente',
+                onTap: () => context.push(AppRoutes.watchHistory),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
     final settingsSection = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -422,6 +458,8 @@ class _BodyState extends ConsumerState<_Body> {
                     const SizedBox(height: ArSpace.xl),
                     statsSection,
                     const SizedBox(height: ArSpace.xl),
+                    activitySection,
+                    const SizedBox(height: ArSpace.xl),
                     sessionSection,
                   ],
                 ),
@@ -447,6 +485,8 @@ class _BodyState extends ConsumerState<_Body> {
               hero,
               const SizedBox(height: ArSpace.xl),
               statsSection,
+              const SizedBox(height: ArSpace.xl),
+              activitySection,
               const SizedBox(height: ArSpace.xl),
               ...feedback,
               editSection,

@@ -12,6 +12,7 @@ import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../domain/episode.dart';
+import '../../domain/intro_markers.dart';
 import '../episode_sync_controller.dart';
 import '../episodes_controller.dart';
 import '../widgets/episode_player.dart';
@@ -145,6 +146,7 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
 
     final player = _PlayerBlock(
       episode: episode,
+      animeId: widget.animeId,
       saver: _saver,
       playerKey: _playerKey,
     );
@@ -273,11 +275,17 @@ class _EpisodeScreenState extends ConsumerState<EpisodeScreen> {
 class _PlayerBlock extends ConsumerWidget {
   const _PlayerBlock({
     required this.episode,
+    required this.animeId,
     required this.saver,
     required this.playerKey,
   });
 
   final Episode episode;
+
+  /// Anime dell'episodio: serve solo a cercare la finestra della sigla, che il
+  /// catalogo tiene per anime e non per episodio.
+  final String animeId;
+
   final WatchProgressSaver saver;
 
   /// Chiave stabile del player, passata dal genitore.
@@ -315,6 +323,10 @@ class _PlayerBlock extends ConsumerWidget {
           key: playerKey,
           sources: list,
           episode: episode,
+          // `value` e non `when`: la sigla e' un di piu', non una cosa da
+          // mostrare. Finche' arriva — o se la lettura fallisce — non c'e'
+          // pulsante, e il player funziona lo stesso.
+          intro: ref.watch(animeIntroProvider(animeId)).value,
           saver: saver,
           // Il resolver viene preso dal provider e non passato dal chiamante:
           // e' la stessa operazione che ha caricato le fonti, quindi deve
@@ -336,12 +348,17 @@ class _Playable extends StatefulWidget {
     required this.episode,
     required this.saver,
     required this.resolve,
+    this.intro,
     super.key,
   });
 
   final List<EpisodeSource> sources;
   final Episode episode;
   final WatchProgressSaver saver;
+
+  /// Finestra della sigla, se il catalogo la conosce. `null` = nessun pulsante
+  /// "Salta intro".
+  final IntroMarkers? intro;
 
   /// Risolutore passato al player per le fonti che hanno solo l'indirizzo
   /// canonico.
@@ -391,6 +408,7 @@ class _PlayableState extends State<_Playable> {
               key: ValueKey('player-${widget.episode.id}'),
               sources: sources,
               sourceIndex: safeIndex,
+              intro: widget.intro,
               resumeFrom: Duration(seconds: widget.episode.progressTime),
               // Il resolver arriva a ogni ricostruzione perche' la schermata
               // puo' cambiare provider mentre e' aperta — dopo un ricollegamento

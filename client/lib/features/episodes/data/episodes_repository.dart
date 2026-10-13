@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
+import '../domain/intro_markers.dart';
 import 'animeunity_extractor.dart';
 
 /// Una risoluzione richiesta e non riuscita.
@@ -72,6 +73,12 @@ abstract interface class EpisodesRepository {
 
   /// Secondi gia' guardati. `null` se non c'e' ancora nessuna riga.
   Future<int?> progress(String episodeId);
+
+  /// La sigla dell'anime, se il catalogo la conosce.
+  ///
+  /// `null` quando il dato non c'e': il player non mostra il pulsante "Salta
+  /// intro" invece di inventare una finestra che taglierebbe contenuto vero.
+  Future<IntroMarkers?> introFor(String animeId);
 }
 
 class SupabaseEpisodesRepository implements EpisodesRepository {
@@ -378,6 +385,31 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
     } catch (_) {
       throw const EpisodesFailure(
         'Progresso non leggibile. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<IntroMarkers?> introFor(String animeId) async {
+    try {
+      final rows = await _client
+          .from('anime')
+          .select('intro_start_seconds, intro_end_seconds')
+          .eq('id', animeId)
+          .limit(1);
+
+      final first = _rows(rows).firstOrNull;
+      if (first == null) return null;
+
+      return IntroMarkers.fromRow(_map(first));
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on EpisodesFailure {
+      rethrow;
+    } catch (_) {
+      throw const EpisodesFailure(
+        'Sigla non leggibile.',
         isRetryable: true,
       );
     }

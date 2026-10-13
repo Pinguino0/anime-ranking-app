@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/episodes_repository.dart';
 import '../domain/episode.dart';
+import '../domain/intro_markers.dart';
 
 final episodesRepositoryProvider = Provider<EpisodesRepository>((ref) {
   throw StateError('episodesRepositoryProvider non e stato inizializzato.');
@@ -45,6 +46,17 @@ class EpisodesController extends AsyncNotifier<List<Episode>> {
 final episodesProvider =
     AsyncNotifierProvider.family<EpisodesController, List<Episode>, String>(
   EpisodesController.new,
+);
+
+/// La sigla di un anime, se il catalogo la conosce.
+///
+/// `FutureProvider` e family perche' e' una lettura sola per anime e va tenuta
+/// in cache: la sigla non cambia mentre si guarda, e rileggerla a ogni
+/// ricostruzione del player sarebbe una richiesta in piu' per niente. Un errore
+/// qui non ha una schermata da mostrare: la schermata legge `.value`, che vale
+/// `null`, e il pulsante "Salta intro" semplicemente non compare.
+final animeIntroProvider = FutureProvider.family<IntroMarkers?, String>(
+  (ref, animeId) => ref.watch(episodesRepositoryProvider).introFor(animeId),
 );
 
 /// Fonti attive di un episodio.

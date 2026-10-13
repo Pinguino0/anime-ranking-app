@@ -1,5 +1,6 @@
 import 'package:animerank/features/episodes/data/episodes_repository.dart';
 import 'package:animerank/features/episodes/domain/episode.dart';
+import 'package:animerank/features/episodes/domain/intro_markers.dart';
 
 /// Repository finto degli episodi.
 ///
@@ -115,6 +116,20 @@ class FakeEpisodesRepository implements EpisodesRepository {
 
   @override
   Future<int?> progress(String episodeId) async => savedSeconds[episodeId];
+
+  /// Sigla per anime, anime -> finestra. Vuoto di default: senza dato il player
+  /// non mostra il pulsante.
+  final Map<String, IntroMarkers> intros = {};
+
+  /// Anime di cui e' stata chiesta la sigla, in ordine.
+  final List<String> introCalls = [];
+
+  @override
+  Future<IntroMarkers?> introFor(String animeId) async {
+    _maybeFail();
+    introCalls.add(animeId);
+    return intros[animeId];
+  }
 
   /// Ultimo riferimento al provider restituito, anime -> record (o `null`).
   final Map<String, EpisodeProviderRef?> providerRefs = {};

@@ -16,6 +16,7 @@ class FakeWatchlistRepository implements WatchlistRepository {
 
   int entriesCalls = 0;
   int personalEntriesCalls = 0;
+  int favoritesCalls = 0;
   int totalsCalls = 0;
 
   /// Anime rimossi, nell'ordine delle chiamate.
@@ -76,6 +77,21 @@ class FakeWatchlistRepository implements WatchlistRepository {
     if (failure != null) throw failure;
 
     return _entries.values.where((e) => e.groupId == null).toList();
+  }
+
+  @override
+  Future<List<WatchlistEntry>> favorites() async {
+    favoritesCalls++;
+
+    final failure = entriesFailure;
+    if (failure != null) throw failure;
+
+    // Come il backend: tutte le liste, la stessa opera una volta sola.
+    final byAnime = <String, WatchlistEntry>{};
+    for (final entry in _entries.values.where((e) => e.isFavorite)) {
+      byAnime.putIfAbsent(entry.animeId, () => entry);
+    }
+    return List.unmodifiable(byAnime.values);
   }
 
   @override

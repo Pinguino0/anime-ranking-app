@@ -25,6 +25,8 @@ import 'features/duels/data/duels_repository.dart';
 import 'features/duels/presentation/duels_controller.dart';
 import 'features/groups/data/groups_repository.dart';
 import 'features/groups/presentation/groups_controller.dart';
+import 'features/history/data/history_repository.dart';
+import 'features/history/presentation/history_controller.dart';
 import 'features/notifications/data/device_token_repository.dart';
 import 'features/notifications/data/firebase_push_messaging.dart';
 import 'features/notifications/data/push_messaging.dart';
@@ -157,6 +159,13 @@ Future<void> main() async {
       // invece di fingere che gli episodi non esistano.
       episodesRepositoryProvider.overrideWithValue(
         SupabaseEpisodesRepository(client),
+      ),
+      // Storico di visione: "Continua da guardare" e Cronologia. Stesso client
+      // degli altri moduli, e stesso motivo per cui va dichiarato qui — in
+      // produzione un repository non inizializzato deve fallire subito invece di
+      // far credere che non ci sia niente da riprendere.
+      historyRepositoryProvider.overrideWithValue(
+        SupabaseHistoryRepository(client),
       ),
       // Le versioni pubblicate, lette una volta all'avvio. Va dichiarato qui
       // con la stessa regola degli altri moduli: il provider di default

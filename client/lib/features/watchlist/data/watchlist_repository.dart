@@ -48,6 +48,14 @@ abstract interface class WatchlistRepository {
   /// RLS limita comunque la lettura alle righe proprie.
   Future<List<WatchlistEntry>> personalEntries();
 
+  /// Anime segnati come preferiti, personali e di gruppo.
+  ///
+  /// Unisce le due tabelle perche' "preferito" e' un giudizio sull'opera, non
+  /// sulla lista in cui sta: un titolo stellato nel gruppo in cui lo si e'
+  /// scoperto e' un preferito quanto uno stellato nella lista personale. La
+  /// stessa opera stellata in piu' liste compare una volta sola.
+  Future<List<WatchlistEntry>> favorites();
+
   /// Totali della watchlist di gruppo, per le cifre in cima alla schermata.
   Future<WatchlistTotals> totals(String groupId);
 
@@ -159,6 +167,73 @@ class SupabaseWatchlistRepository implements WatchlistRepository {
       if (e is WatchlistFailure) rethrow;
       throw const WatchlistFailure('Lista non disponibile. Riprova.', isRetryable: true);
     }
+  }
+
+  @override
+  Future<List<WatchlistEntry>> favorites() async {
+    try {
+      final uid = _uid;
+
+      // Due letture invece di una vista: la lista personale e quella di gruppo
+      // sono due tabelle con colonne quasi uguali ma non identiche (`group_id`
+      // non esiste su `personal_watchlist`), e unirle qui evita di aggiungere
+      // un'altra funzione al database per un elenco che non e' mai enorme.
+      final personal = await _client
+          .from('personal_watchlist')
+          .select(_personalSelect)
+          .eq('user_id', uid)
+          .eq('is_favorite', true)
+          .order('updated_at', ascending: false)
+          .limit(pageSize);
+
+      final shared = await _client
+          .from('watchlists')
+          .select(_select)
+          .eq('user_id', uid)
+          .eq('is_favorite', true)
+          .order('updated_at', ascending: false)
+          .limit(pageSize);
+
+      // La stessa opera stellata in piu' liste e' un preferito solo: si tiene
+      // la riga aggiornata piu' di recente, che e' quella con lo stato piu'
+      // fresco.
+      final byAnime = <String, WatchlistEntry>{};
+      for (final row in [
+        ..._rows(personal).map((r) => WatchlistEntry.parse(_map(r), mineId: uid)),
+        ..._rows(shared).map((r) => WatchlistEntry.parse(_map(r), mineId: uid)),
+      ]) {
+        final existing = byAnime[row.animeId];
+        if (existing == null || _isNewer(row, existing)) {
+          byAnime[row.animeId] = row;
+        }
+      }
+
+      final result = byAnime.values.toList()
+        ..sort((a, b) => _recency(b.updatedAt, a.updatedAt));
+      return result;
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } catch (e) {
+      if (e is WatchlistFailure) rethrow;
+      throw const WatchlistFailure('Preferiti non disponibili. Riprova.', isRetryable: true);
+    }
+  }
+
+  /// true se [a] e' stato aggiornato dopo [b]. Le date mancanti perdono.
+  static bool _isNewer(WatchlistEntry a, WatchlistEntry b) {
+    final at = a.updatedAt;
+    final bt = b.updatedAt;
+    if (at == null) return false;
+    if (bt == null) return true;
+    return at.isAfter(bt);
+  }
+
+  /// Confronto decrescente che mette in fondo le date mancanti.
+  static int _recency(DateTime? a, DateTime? b) {
+    if (a == null && b == null) return 0;
+    if (a == null) return 1;
+    if (b == null) return -1;
+    return b.compareTo(a);
   }
 
   @override

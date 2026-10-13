@@ -20,6 +20,7 @@ import '../../features/groups/presentation/screens/group_members_screen.dart';
 import '../../features/groups/presentation/screens/group_picker_screen.dart';
 import '../../features/groups/presentation/screens/groups_list_screen.dart';
 import '../../features/groups/presentation/screens/join_group_screen.dart';
+import '../../features/history/presentation/screens/history_screen.dart';
 import '../../features/profile/presentation/screens/delete_account_screen.dart';
 import '../../features/profile/presentation/screens/notification_settings_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
@@ -27,6 +28,7 @@ import '../../features/ranking/presentation/screens/ranking_screen.dart';
 import '../../features/shell/presentation/shell_screen.dart';
 import '../../features/tournaments/presentation/screens/tournament_detail_screen.dart';
 import '../../features/tournaments/presentation/screens/tournaments_screen.dart';
+import '../../features/watchlist/presentation/screens/favorites_screen.dart';
 import '../../features/watchlist/presentation/screens/my_list_screen.dart';
 import '../../features/watchlist/presentation/screens/watchlist_screen.dart';
 
@@ -110,6 +112,8 @@ class AppRoutes {
       '/tournaments/$groupId/$tournamentId';
 
   static const String profile = '/profile';
+  static const String watchHistory = '/profile/history';
+  static const String favorites = '/profile/favorites';
   static const String notificationSettings = '/profile/notifications';
   static const String achievements = '/profile/achievements';
   static const String deleteAccount = '/profile/delete';
@@ -385,6 +389,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) =>
                 arSectionRoute(child: const ProfileScreen()),
             routes: [
+              GoRoute(
+                path: 'history',
+                builder: (context, state) => const HistoryScreen(),
+              ),
+              GoRoute(
+                path: 'favorites',
+                builder: (context, state) => const FavoritesScreen(),
+              ),
               GoRoute(
                 path: 'notifications',
                 builder: (context, state) => const NotificationSettingsScreen(),

@@ -121,6 +121,17 @@ final myListProvider =
   retry: appRetry,
 );
 
+/// Anime segnati come preferiti, personali e di gruppo.
+///
+/// Un [FutureProvider] come [personalOverviewProvider]: e' di sola lettura, la
+/// pagina che lo usa non ci scrive sopra. Va invalidato dopo ogni scrittura —
+/// stella, stato o rimozione — perche' ognuna di quelle puo' cambiare questo
+/// elenco.
+final favoritesProvider = FutureProvider<List<WatchlistEntry>>(
+  (ref) => ref.watch(watchlistRepositoryProvider).favorites(),
+  retry: appRetry,
+);
+
 /// Modifiche alla watchlist.
 ///
 /// Un controller solo per le scritture, con stato di caricamento: le voci
@@ -168,6 +179,7 @@ class WatchlistActionController extends AsyncNotifier<void> {
     ref.invalidate(watchlistTotalsProvider(groupId));
     ref.invalidate(groupRecommendationsProvider(groupId));
     ref.invalidate(myListProvider);
+    ref.invalidate(favoritesProvider);
   }
 
   Future<void> setStatus({
@@ -241,6 +253,8 @@ class WatchlistActionController extends AsyncNotifier<void> {
     // "La mia lista" e' la watchlist personale: una scrittura senza gruppo la
     // tocca direttamente, una di gruppo no.
     ref.invalidate(myListProvider);
+    // I preferiti invece si vedono da tutte le liste: ogni scrittura li tocca.
+    ref.invalidate(favoritesProvider);
   }
 }
 

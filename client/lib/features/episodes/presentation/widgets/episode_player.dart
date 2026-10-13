@@ -17,6 +17,7 @@ import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../data/episodes_repository.dart';
 import '../../domain/episode.dart';
+import '../../domain/intro_markers.dart';
 
 /// Firma della funzione che trasforma una fonte canonica in un link
 /// riproducibile.
@@ -49,6 +50,7 @@ class EpisodePlayer extends StatefulWidget {
   const EpisodePlayer({
     required this.sources,
     this.sourceIndex,
+    this.intro,
     this.resumeFrom,
     this.onProgress,
     this.onComplete,
@@ -67,6 +69,12 @@ class EpisodePlayer extends StatefulWidget {
   /// passato da solo a una fonte successiva, cosi' il selettore non resta
   /// fermo su una qualita' che non e' quella in riproduzione.
   final int? sourceIndex;
+
+  /// Finestra della sigla, se il catalogo la conosce.
+  ///
+  /// `null` e' il caso normale di un catalogo che non ha il dato: nessun
+  /// pulsante, nessun salto a un secondo indovinato.
+  final IntroMarkers? intro;
 
   /// Secondi da cui ripartire.
   ///
@@ -734,6 +742,7 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
             player: player,
             controller: controller,
             sourceLabel: widget.sources[index].label,
+            intro: widget.intro,
             onTogglePlay: _togglePlay,
             onSeek: _seekTo,
             // "Prossimo" si limita a chiudere la rotta: il cambio di fonte lo
@@ -801,6 +810,7 @@ class _EpisodePlayerState extends State<EpisodePlayer> {
                   controller: _videoController!,
                   sourceLabel: widget.sources[_index].label,
                   isPlaying: _player!.state.playing,
+                  intro: widget.intro,
                   onTogglePlay: _togglePlay,
                   onSeek: _seekTo,
                   onNext: _nextEpisode == null
@@ -886,6 +896,7 @@ class _VideoSurface extends StatefulWidget {
     required this.isPlaying,
     required this.onTogglePlay,
     required this.onSeek,
+    this.intro,
     this.onNext,
     this.isFullscreen = false,
     this.onToggleFullscreen,
@@ -896,6 +907,9 @@ class _VideoSurface extends StatefulWidget {
 
   /// Nome della fonte in uso, mostrato in alto quando i comandi sono visibili.
   final String sourceLabel;
+
+  /// Finestra della sigla, se il catalogo la conosce.
+  final IntroMarkers? intro;
 
   final bool isPlaying;
   final VoidCallback onTogglePlay;
@@ -1023,6 +1037,20 @@ class _VideoSurfaceState extends State<_VideoSurface> {
     _showSkipFeedback(delta.inSeconds);
   }
 
+  /// Salta alla fine della sigla.
+  ///
+  /// Alla fine dichiarata e non a un secondo dopo: il margine sarebbe un numero
+  /// inventato, e il punto della sigla e' l'unico che il catalogo conosce.
+  Future<void> _skipIntro() async {
+    final intro = widget.intro;
+    if (intro == null) return;
+
+    final total = widget.player.state.duration;
+    final target = total > Duration.zero && intro.end > total ? total : intro.end;
+    await widget.player.seek(target);
+    if (mounted) setState(() {});
+  }
+
   void _showSkipFeedback(int seconds) {
     _skipTimer?.cancel();
     setState(() => _skipFeedback = seconds);
@@ -1122,7 +1150,56 @@ class _VideoSurfaceState extends State<_VideoSurface> {
             ),
           ),
         ),
+        // Ultimo figlio dello stack, quindi sopra i comandi: il pulsante deve
+        // restare premibile anche quando la barra e' a schermo, che e'
+        // esattamente il momento in cui la si sta cercando.
+        if (widget.intro?.isActive(state.position) ?? false)
+          Positioned(
+            right: ArSpace.md,
+            bottom: ArSpace.xxl,
+            child: _SkipIntroButton(onTap: _skipIntro),
+          ),
       ],
+    );
+  }
+}
+
+/// Pulsante "Salta intro" mostrato mentre il video e' dentro la sigla.
+///
+/// Un pulsante e non un salto automatico: la finestra della sigla e' una stima
+/// del catalogo, e un salto che parte da solo taglierebbe contenuto vero quando
+/// la stima e' sbagliata. Cosi' l'ultima parola resta a chi guarda.
+class _SkipIntroButton extends StatelessWidget {
+  const _SkipIntroButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ArPressable(
+      onTap: onTap,
+      scale: 0.95,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.62),
+          borderRadius: BorderRadius.circular(ArRadii.control),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: ArSpace.md,
+            vertical: ArSpace.xs,
+          ),
+          child: Text(
+            'Salta intro',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1139,6 +1216,7 @@ class _FullscreenPlayer extends StatefulWidget {
     required this.player,
     required this.controller,
     required this.sourceLabel,
+    required this.intro,
     required this.onTogglePlay,
     required this.onSeek,
     required this.onToggleFullscreen,
@@ -1148,6 +1226,7 @@ class _FullscreenPlayer extends StatefulWidget {
   final Player player;
   final mkv.VideoController controller;
   final String sourceLabel;
+  final IntroMarkers? intro;
   final VoidCallback onTogglePlay;
   final void Function(double fraction) onSeek;
   final VoidCallback onToggleFullscreen;
@@ -1193,6 +1272,7 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
         controller: widget.controller,
         sourceLabel: widget.sourceLabel,
         isPlaying: widget.player.state.playing,
+        intro: widget.intro,
         onTogglePlay: widget.onTogglePlay,
         onSeek: widget.onSeek,
         onNext: widget.onNext,

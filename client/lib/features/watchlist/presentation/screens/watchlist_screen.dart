@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../anime/domain/anime.dart';
 import '../../../auth/presentation/widgets/auth_scaffold.dart';
 import '../../../../core/constants/breakpoints.dart';
 import '../../../../core/router/app_router.dart';
@@ -13,6 +12,7 @@ import '../../../../core/ui/section_header.dart';
 import '../../../../core/ui/transitions.dart';
 import '../../../ranking/presentation/ranking_controller.dart';
 import '../../domain/watchlist.dart';
+import '../watchlist_anime.dart';
 import '../watchlist_controller.dart';
 
 /// Watchlist personale dentro un gruppo.
@@ -408,23 +408,6 @@ Color statusColor(WatchStatus status) => switch (status) {
       WatchStatus.paused => ArColors.paused,
     };
 
-/// Scheda anime ricostruita da una riga di watchlist.
-///
-/// Come nella classifica: la riga porta l'id interno di `public.anime` e il
-/// minimo dei dati, quindi la scheda mostra la realta' di quello che c'e',
-/// senza riempirsi i buchi con copertine o voti inventati. La lista dei voti e'
-/// un'altra tabella e non si ricava da qui.
-AnimeEntry _animeOf(WatchlistEntry entry) => AnimeEntry(
-      externalId: entry.animeId,
-      title: entry.title,
-      italianTitle: entry.italianTitle,
-      imageUrl: entry.imageUrl,
-      episodes: entry.episodes,
-      year: entry.year,
-      genres: entry.genres,
-      status: entry.airing ? AnimeAirStatus.airing : null,
-    );
-
 /// Cifre della watchlist, in alto.
 ///
 /// Un bordo in basso invece di un'ombra: la striscia si appoggia al fondo della
@@ -713,7 +696,7 @@ class WatchlistTable extends ConsumerWidget {
   Future<void> _openDetail(BuildContext context, WatchlistEntry entry) {
     return context.push<void>(
       AppRoutes.animeDetail,
-      extra: _animeOf(entry),
+      extra: animeEntryOf(entry),
     );
   }
 
@@ -763,7 +746,7 @@ class WatchlistRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final anime = _animeOf(entry);
+    final anime = animeEntryOf(entry);
 
     // La scheda e' l'involucro premibile e non la riga intera: il tocco
     // apre la scheda dell'opera, mentre stato, episodi e preferito hanno
@@ -874,7 +857,7 @@ class _RecommendedCard extends ConsumerWidget {
       child: ArPressable(
         onTap: () => context.push(
           AppRoutes.animeDetail,
-          extra: _animeOf(entry),
+          extra: animeEntryOf(entry),
         ),
         child: Container(
           padding: const EdgeInsets.all(ArSpace.sm),

@@ -12,6 +12,9 @@ import '../../../core/ui/section_header.dart';
 import '../../../core/ui/transitions.dart';
 import '../../anime/domain/anime.dart';
 import '../../auth/presentation/auth_controller.dart';
+import '../../history/domain/watch_history.dart';
+import '../../history/presentation/history_controller.dart';
+import '../../history/presentation/widgets/continue_watching_card.dart';
 import '../home_controller.dart';
 
 /// Home dell'app: banner in evidenza, righe da sfogliare, catalogo.
@@ -33,6 +36,7 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final feed = ref.watch(homeFeedProvider);
+    final continueWatching = ref.watch(continueWatchingProvider);
     final email = ref.watch(authStatusProvider).user?.email;
     final page = ArSpace.page(context);
 
@@ -40,8 +44,14 @@ class HomeScreen extends ConsumerWidget {
       body: RefreshIndicator(
         // La ricarica esplicita e' l'unico modo di aggiornare la home: si
         // ricarica quando lo si chiede, non a ogni visita, altrimenti tornare
-        // dal profilo rifarebbe la stessa richiesta.
-        onRefresh: () => ref.read(homeFeedProvider.notifier).refresh(),
+        // dal profilo rifarebbe la stessa richiesta. Anche "Continua da
+        // guardare" si rilegge qui: dopo aver guardato qualcosa il punto e'
+        // cambiato, e tirare la home e' il gesto che l'utente si aspetta che lo
+        // aggiorni.
+        onRefresh: () async {
+          ref.invalidate(continueWatchingProvider);
+          await ref.read(homeFeedProvider.notifier).refresh();
+        },
         child: CustomScrollView(
           slivers: [
             _TopBar(email: email, padding: page),
@@ -70,7 +80,12 @@ class HomeScreen extends ConsumerWidget {
                   ),
                 ),
               ],
-              data: (data) => _content(context, ref, data),
+              data: (data) => _content(
+                context,
+                ref,
+                data,
+                continueWatching.asData?.value ?? const [],
+              ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
@@ -79,14 +94,23 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  List<Widget> _content(BuildContext context, WidgetRef ref, HomeFeed feed) {
+  List<Widget> _content(
+    BuildContext context,
+    WidgetRef ref,
+    HomeFeed feed,
+    List<ContinueWatchingItem> continueWatching,
+  ) {
     final usable = feed.rows
         .where((row) => row.entries.length >= _minRow)
         .toList();
 
     // Catalogo ancora vuoto: non e' un errore, e' una base da popolare. Il
     // testo lo dice, invece di lasciare una pagina nera che sembra rotta.
-    if (usable.isEmpty && feed.feature == null) {
+    //
+    // Anche "Continua da guardare" tiene in piedi la pagina: chi ha lasciato un
+    // episodio a meta' ha qualcosa da fare anche se la griglia del catalogo non
+    // e' ancora arrivata.
+    if (usable.isEmpty && feed.feature == null && continueWatching.isEmpty) {
       return const [
         SliverFillRemaining(
           hasScrollBody: false,
@@ -107,12 +131,48 @@ class HomeScreen extends ConsumerWidget {
           child: _Banner(entry: feed.feature!),
         ),
 
+      // Prima delle righe del catalogo: riprendere quello che si stava guardando
+      // e' la prima cosa che si vuole fare aprendo l'app, non una scoperta da
+      // fare scorrendo.
+      if (continueWatching.isNotEmpty)
+        SliverToBoxAdapter(child: _continueRow(ref, continueWatching)),
+
       for (final row in usable)
         SliverToBoxAdapter(child: _row(row)),
 
       if (feed.catalog.isNotEmpty)
         SliverToBoxAdapter(child: _catalog(context, feed.catalog)),
     ];
+  }
+
+  /// Riga "Continua da guardare".
+  ///
+  /// Il tocco riprende l'episodio, non apre la scheda: e' quello che si vuole
+  /// fare quando si tocca una card di riprendi, e la scheda si raggiunge lo
+  /// stesso dal titolo nella schermata dell'episodio.
+  Widget _continueRow(WidgetRef ref, List<ContinueWatchingItem> items) {
+    return ContentRow(
+      title: 'Continua da guardare',
+      subtitle: 'Riprendi dall\'episodio dove eri rimasto',
+      itemCount: items.length,
+      itemBuilder: (context, i) {
+        final item = items[i];
+        return ContinueWatchingCard(
+          item: item,
+          // `push` completa quando la rotta si chiude: al ritorno l'episodio e'
+          // avanzato, e la riga va riletta invece di restare ferma al punto di
+          // quando e' partita. Non si puo' fare dall'uscita del player perche'
+          // in `dispose` il ref non e' piu' utilizzabile.
+          onTap: () async {
+            await context.push(
+              AppRoutes.episode(item.animeId, item.episodeId),
+              extra: item.animeTitle,
+            );
+            ref.invalidate(continueWatchingProvider);
+          },
+        );
+      },
+    );
   }
 
   Widget _row(HomeRow row) {

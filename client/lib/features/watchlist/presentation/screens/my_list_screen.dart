@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/app_failure.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/ui/anime_thumb.dart';
 import '../../../../core/ui/content_row.dart';
 import '../../../../core/ui/section_header.dart';
-import '../../../groups/domain/group.dart';
-import '../../../groups/presentation/groups_controller.dart';
+import '../../../anime/domain/anime.dart';
+import '../../../anime/presentation/anime_controller.dart';
 import '../../../episodes/presentation/episode_sync_controller.dart';
 import '../../domain/watchlist.dart';
 import '../watchlist_controller.dart';
@@ -105,34 +107,270 @@ class _MyListScreenState extends ConsumerState<MyListScreen> {
     );
   }
 
-  Future<void> _add(BuildContext context, WidgetRef ref) async {
-    final groups = ref.read(groupsListProvider).value ?? const <AnimeGroup>[];
+  /// Apre la ricerca per aggiungere un anime alla lista personale.
+  ///
+  /// Non passa da un gruppo: la lista personale e' di chi la usa, e obbligare a
+  /// scegliere un gruppo prima di poterci mettere un titolo significava non
+  /// poterla riempire affatto senza un gruppo. La ricerca parte dal catalogo e,
+  /// se non trova, puo' interrogare quello esterno.
+  Future<void> _add(BuildContext context, WidgetRef ref) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _AddToPersonalSheet(),
+    );
+  }
+}
 
-    if (groups.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Crea un gruppo per aggiungere anime alla lista.')),
+/// Ricerca per aggiungere un anime alla lista personale.
+///
+/// Un campo di ricerca e i risultati, senza il passaggio dal gruppo. Cerca prima
+/// nel catalogo; se non trova nulla offre la ricerca online, con lo stesso
+/// criterio della ricerca principale: prima il locale, poi — su richiesta —
+/// l'esterno.
+class _AddToPersonalSheet extends ConsumerStatefulWidget {
+  const _AddToPersonalSheet();
+
+  @override
+  ConsumerState<_AddToPersonalSheet> createState() => _AddToPersonalSheetState();
+}
+
+class _AddToPersonalSheetState extends ConsumerState<_AddToPersonalSheet> {
+  final TextEditingController _field = TextEditingController();
+
+  /// Id appena aggiunti in questa sessione del foglio: la lista personale si
+  /// ricarica in secondo piano, ma la riga deve sparire subito dal risultato.
+  final Set<String> _added = {};
+
+  List<AnimeEntry> _results = const [];
+  bool _loading = false;
+  bool _triedRemote = false;
+  String _query = '';
+  String? _error;
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search({bool remote = false}) async {
+    final query = _field.text.trim();
+    if (query.isEmpty) {
+      setState(() => _error = 'Scrivi il titolo di un anime.');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    final repository = ref.read(animeRepositoryProvider);
+    try {
+      final page = remote
+          ? await repository.searchRemote(query)
+          : await repository.searchLocal(query);
+
+      if (!mounted) return;
+      setState(() {
+        _results = page.results;
+        _query = query;
+        if (remote) _triedRemote = true;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error =
+            error is AppFailure ? error.message : 'Ricerca non riuscita. Riprova.';
+      });
+    }
+  }
+
+  Future<void> _add(AnimeEntry entry) async {
+    final animeId = entry.id;
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Un risultato del catalogo esterno arriva senza id interno finche' la cache
+    // non lo ha scritto: senza id non c'e' riga da inserire. Lo si dice invece
+    // di far fallire la scrittura con un errore tecnico.
+    if (animeId == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Questo titolo non e\' ancora in catalogo: riprova tra un momento.',
+          ),
+        ),
       );
       return;
     }
 
-    // La lista personale non ha una classifica propria da cui pescare: si usa
-    // quella di un gruppo come suggerimento, ma l'aggiunta resta personale.
-    final chosen = groups.length == 1
-        ? groups.first
-        : await showModalBottomSheet<AnimeGroup>(
-            context: context,
-            showDragHandle: true,
-            builder: (context) => _GroupChooser(groups: groups),
+    try {
+      await ref.read(watchlistActionProvider.notifier).setStatus(
+            animeId: animeId,
+            status: WatchStatus.watching,
           );
 
-    if (chosen == null || !context.mounted) return;
+      if (!mounted) return;
+      setState(() => _added.add(animeId));
+      messenger.showSnackBar(
+        SnackBar(content: Text('${entry.displayTitle} aggiunto in visione.')),
+      );
+    } on WatchlistFailure catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => AddFromRankingSheet(groupId: chosen.id, personal: true),
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final page = ArSpace.page(context);
+    final media = MediaQuery.of(context);
+
+    final existing = {
+      for (final entry
+          in ref.watch(myListProvider).value ?? const <WatchlistEntry>[])
+        entry.animeId,
+    };
+
+    return Padding(
+      // Il foglio sale sopra la tastiera: senza, il campo in cui si scrive
+      // resterebbe dietro di essa.
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: SafeArea(
+        child: ConstrainedBox(
+          // Si adatta al contenuto finche' e' corto e si ferma a una frazione
+          // dello schermo quando i risultati crescono.
+          constraints: BoxConstraints(maxHeight: media.size.height * 0.82),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  page.left,
+                  ArSpace.md,
+                  page.right,
+                  ArSpace.sm,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Aggiungi alla mia lista',
+                        style: theme.textTheme.titleLarge),
+                    const SizedBox(height: ArSpace.xxs),
+                    Text(
+                      'Cerca un anime e mettilo in visione. La lista personale '
+                      'non ha bisogno di un gruppo.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ArColors.textMid,
+                      ),
+                    ),
+                    const SizedBox(height: ArSpace.md),
+                    TextField(
+                      controller: _field,
+                      autofocus: true,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => _search(),
+                      decoration: InputDecoration(
+                        hintText: 'Titolo dell\'anime',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _loading
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(child: _body(context, existing)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _body(BuildContext context, Set<String> existing) {
+    final theme = Theme.of(context);
+    final page = ArSpace.page(context);
+
+    if (_error != null) {
+      return Padding(
+        padding: EdgeInsets.all(page.left),
+        child: Text(_error!, style: theme.textTheme.bodyMedium),
+      );
+    }
+
+    if (_query.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.all(page.left),
+        child: Text(
+          'Scrivi almeno una parola e premi invio.',
+          style: theme.textTheme.bodySmall?.copyWith(color: ArColors.textMid),
+        ),
+      );
+    }
+
+    if (_results.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.all(page.left),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Nessun risultato in catalogo per "$_query".',
+              style: theme.textTheme.bodyMedium,
+            ),
+            if (!_triedRemote) ...[
+              const SizedBox(height: ArSpace.sm),
+              OutlinedButton.icon(
+                onPressed: () => _search(remote: true),
+                icon: const Icon(Icons.cloud_download_outlined),
+                label: const Text('Cerca online'),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      shrinkWrap: true,
+      padding: EdgeInsets.symmetric(horizontal: page.left, vertical: ArSpace.xs),
+      itemCount: _results.length,
+      itemBuilder: (context, i) {
+        final entry = _results[i];
+        final already = entry.id != null &&
+            (existing.contains(entry.id) || _added.contains(entry.id));
+
+        return ListTile(
+          leading: AnimeThumb(url: entry.imageUrl, title: entry.displayTitle),
+          title: Text(
+            entry.displayTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(entry.factsLabel.isEmpty ? '—' : entry.factsLabel),
+          trailing: already
+              ? const Icon(Icons.check_circle, color: ArColors.completed)
+              : IconButton(
+                  tooltip: 'Aggiungi ${entry.displayTitle}',
+                  icon: const Icon(Icons.add_circle_outline),
+                  onPressed: () => _add(entry),
+                ),
+        );
+      },
     );
   }
 }
@@ -314,40 +552,6 @@ class _BodyState extends State<_Body> {
   }
 
   static int _delayOf(int index) => (index * 30).clamp(0, 320);
-}
-
-/// Scelta del gruppo da cui pescare gli anime da aggiungere.
-///
-/// La lista personale non ha una classifica propria: si usa quella di un
-/// gruppo come suggerimento. Con un gruppo solo non compare.
-class _GroupChooser extends StatelessWidget {
-  const _GroupChooser({required this.groups});
-
-  final List<AnimeGroup> groups;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(ArSpace.md),
-            child: Text('Da quale gruppo pesco i titoli?', style: theme.textTheme.titleMedium),
-          ),
-          for (final group in groups)
-            ListTile(
-              leading: const Icon(Icons.groups_outlined),
-              title: Text(group.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-              onTap: () => Navigator.of(context).pop(group),
-            ),
-          const SizedBox(height: ArSpace.sm),
-        ],
-      ),
-    );
-  }
 }
 
 /// Striscia con i totali complessivi.
