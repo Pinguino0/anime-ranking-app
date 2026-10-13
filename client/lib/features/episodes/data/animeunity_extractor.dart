@@ -80,6 +80,30 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   static final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 15);
 
+  /// Il client che risolve gli indirizzi via DNS-over-HTTPS.
+  ///
+  /// Viene costruito solo se serve, cioe' quando un'estrazione normale
+  /// fallisce: sulla maggioranza delle reti non tocca mai la rete.
+  static HttpClient? _bypassHttpClient;
+
+  /// Il client usato per parlare con i resolver DoH. Non ha nessun
+  /// `connectionFactory`, perche' altrimenti si risolverebbe ricorsivamente.
+  static final HttpClient _dohHttp = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 8);
+
+  /// Gli IP risolti via DoH, per host. Una risoluzione per host per processo.
+  static final Map<String, List<String>> _dohCache = {};
+
+  /// Indirizzi Cloudflare noti che servono il sito. Si tentano per ultimi,
+  /// quando il DoH non risponde: sono gli stessi a cui puntano i domini
+  /// alternativi (`.to`, `.it`), che sono lo stesso operatore.
+  static const List<String> _cloudflareFallbacks = [
+    '188.114.96.7',
+    '188.114.97.7',
+    '104.21.83.16',
+    '172.67.166.248',
+  ];
+
   static _Session? _session;
   static DateTime? _sessionExpiresAt;
 
@@ -93,6 +117,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   }) async {
     try {
       return await _extract(
+        client: _http,
         sourceId: sourceId,
         canonicalUrl: canonicalUrl,
         episodeNumber: episodeNumber,
@@ -106,7 +131,29 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       // vedi `_EpisodePlayerState.resolutionTries` — ne compra una nuova invece
       // di ripetere lo stesso errore. Su un errore non ritentabile non si tocca
       // nulla: la sessione non c'entra con un episodio inesistente.
-      if (failure.isRetryable) {
+      if (!failure.isRetryable) rethrow;
+
+      _session = null;
+      _sessionExpiresAt = null;
+
+      // Secondo giro con il client "anti-blocco". Alcune reti — tipicamente i
+      // dati mobili italiani — intercettano il DNS della fonte e rispondono con
+      // una pagina di blocco: la connessione fallisce subito e il player mostra
+      // "le fonti non si risolvono", anche se dal Wi-Fi lo stesso episodio
+      // parte. Qui si risolve l'indirizzo con DNS-over-HTTPS (che il gestore
+      // non vede) e ci si collega direttamente, tenendo l'SNI giusto perche' il
+      // certificato resti valido. Se anche cosi' non passa, si rilancia
+      // l'errore originale: il player passa alla fonte successiva come prima.
+      try {
+        return await _extract(
+          client: _bypassHttp,
+          sourceId: sourceId,
+          canonicalUrl: canonicalUrl,
+          episodeNumber: episodeNumber,
+          quality: quality,
+          providerSlug: providerSlug,
+        );
+      } on ClientExtractionFailure {
         _session = null;
         _sessionExpiresAt = null;
       }
@@ -127,12 +174,12 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final animeId = _parseAnimeId(canonicalUrl);
     if (animeId == null) return null;
 
-    final session = await _getSession();
+    final session = await _getSession(_http);
     final uri = Uri.parse('$_base/info_api/$animeId/1').replace(
       queryParameters: {'start_range': '1', 'end_range': '1'},
     );
 
-    final info = await _apiJson(uri, _apiHeaders(session));
+    final info = await _apiJson(_http, uri, _apiHeaders(session));
     final raw = info['episodes_count'];
     if (raw is num) return raw.toInt();
     if (raw is String) return int.tryParse(raw);
@@ -140,6 +187,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   }
 
   Future<ResolvedSource> _extract({
+    required HttpClient client,
     required String sourceId,
     required String canonicalUrl,
     required int episodeNumber,
@@ -160,7 +208,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
 
     final wanted = _requestedQuality(quality);
 
-    final session = await _getSession();
+    final session = await _getSession(client);
 
     final infoUri = Uri.parse('$_base/info_api/$animeId/$episodeNumber').replace(
       queryParameters: {
@@ -169,7 +217,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       },
     );
 
-    final info = await _apiJson(infoUri, _apiHeaders(session));
+    final info = await _apiJson(client, infoUri, _apiHeaders(session));
     final episodes = info['episodes'];
     final list = episodes is List ? episodes : const [];
 
@@ -197,6 +245,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final animePage = '$_base/anime/$episodeId-x';
 
     final embedResponse = await _send(
+      client,
       'GET',
       Uri.parse('$_base/embed-url/$episodeId'),
       headers: {
@@ -217,6 +266,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     }
 
     final page = await _send(
+      client,
       'GET',
       Uri.parse(embedUrl),
       headers: {
@@ -232,7 +282,8 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
 
     final config = _parseMasterPlaylist(page.body);
     final playlistUrl = _buildPlaylistUrl(config);
-    final (hlsUrl, expiresAt) = await _pickRendition(playlistUrl, wanted);
+    final (hlsUrl, expiresAt) =
+        await _pickRendition(client, playlistUrl, wanted);
 
     return ResolvedSource(
       sourceId: sourceId,
@@ -252,7 +303,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   // Sessione e chiamate
   // -------------------------------------------------------------------------
 
-  Future<_Session> _getSession() async {
+  Future<_Session> _getSession(HttpClient client) async {
     final cached = _session;
     final expiresAt = _sessionExpiresAt;
     if (cached != null && expiresAt != null && DateTime.now().isBefore(expiresAt)) {
@@ -260,6 +311,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     }
 
     final response = await _send(
+      client,
       'GET',
       Uri.parse('$_base/'),
       headers: {'user-agent': _userAgent, 'accept': 'text/html'},
@@ -303,11 +355,12 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       };
 
   Future<Map<String, dynamic>> _apiJson(
+    HttpClient client,
     Uri uri,
     Map<String, String> headers, {
     bool retried = false,
   }) async {
-    final response = await _send('GET', uri, headers: headers);
+    final response = await _send(client, 'GET', uri, headers: headers);
 
     // 419: la sessione non vale piu'. Se ne compra una nuova e si rifa' la
     // richiesta una volta sola — insistere all'infinito su una sessione che il
@@ -315,8 +368,8 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     if (response.status == 419 && !retried) {
       _session = null;
       _sessionExpiresAt = null;
-      final fresh = await _getSession();
-      return _apiJson(uri, _apiHeaders(fresh), retried: true);
+      final fresh = await _getSession(client);
+      return _apiJson(client, uri, _apiHeaders(fresh), retried: true);
     }
 
     if (response.status != 200) {
@@ -336,12 +389,13 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   }
 
   Future<_HttpResult> _send(
+    HttpClient client,
     String method,
     Uri uri, {
     Map<String, String> headers = const {},
   }) async {
     try {
-      final request = await _http.openUrl(method, uri);
+      final request = await client.openUrl(method, uri);
       headers.forEach(request.headers.set);
       final response = await request.close().timeout(const Duration(seconds: 20));
       final body = await response.transform(utf8.decoder).join();
@@ -354,10 +408,119 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       return _HttpResult(response.statusCode, body, setCookies);
     } on TimeoutException {
       throw const ClientExtractionFailure('AnimeUnity non risponde. Riprova.');
+    } on HandshakeException {
+      // Tipico di una rete che intercetta la fonte: la connessione arriva a un
+      // server che non ha il certificato giusto. Ritentabile, perche' il giro
+      // con il DNS-over-HTTPS puo' aggirarla.
+      throw const ClientExtractionFailure(
+          'Connessione sicura ad AnimeUnity non riuscita. Riprova.');
     } on SocketException {
       throw const ClientExtractionFailure(
           'Connessione ad AnimeUnity non riuscita. Controlla la rete.');
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Aggiramento dei blocchi di rete
+  // -------------------------------------------------------------------------
+
+  static HttpClient get _bypassHttp =>
+      _bypassHttpClient ??= _buildBypassClient();
+
+  /// Il client che scavalca i blocchi DNS/IP del gestore.
+  ///
+  /// Differenza dall'`HttpClient` normale: prima di ogni connessione risolve
+  /// l'host con DNS-over-HTTPS e si collega all'indirizzo vero, poi fa
+  /// l'handshake TLS indicando il nome giusto. Un gestore che risponde alle
+  /// richieste DNS con una pagina di blocco viene cosi' scavalcato: la
+  /// connessione non passa piu' dal suo resolver.
+  static HttpClient _buildBypassClient() {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 15);
+
+    client.connectionFactory = (uri, proxyHost, proxyPort) async {
+      final host = uri.host;
+      final port = uri.port;
+      final isAnimeUnity = host.contains('animeunity');
+
+      final resolved = await _dohLookup(host);
+
+      // Ordine dei tentativi: gli indirizzi veri appena risolti; se il DoH non
+      // ha risposto, il nome (il DNS di sistema, come sempre); per il sito, in
+      // ultima istanza, indirizzi Cloudflare noti. Cloudflare serve lo stesso
+      // sito da qualunque suo IP, basta l'SNI giusto nel handshake.
+      final targets = <Object>[
+        if (resolved.isNotEmpty) ...resolved,
+        if (resolved.isEmpty) host,
+        if (isAnimeUnity) ..._cloudflareFallbacks,
+      ];
+
+      Object? lastError;
+      for (final target in targets) {
+        try {
+          final task = await Socket.startConnect(target, port);
+          if (uri.scheme != 'https') return task;
+
+          final raw = await task.socket;
+          // `host` (non l'IP) e' l'SNI: il certificato resta valido e il
+          // server sa quale sito si sta chiedendo.
+          final secure = await SecureSocket.secure(raw, host: host);
+          return ConnectionTask.fromSocket(
+            Future<SecureSocket>.value(secure),
+            task.cancel,
+          );
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError ??
+          const SocketException('Nessun indirizzo raggiungibile.');
+    };
+
+    return client;
+  }
+
+  /// Gli indirizzi IPv4 di [host], chiesti a un resolver DNS-over-HTTPS.
+  ///
+  /// Si usano indirizzi letterali (`1.1.1.1`, `8.8.8.8`) e non i nomi dei
+  /// resolver: se il gestore intercetta il DNS, anche il nome del resolver
+  /// verrebbe falsato, mentre il suo indirizzo no. Il risultato resta in cache
+  /// per il processo: un host si risolve una volta sola.
+  static Future<List<String>> _dohLookup(String host) async {
+    final cached = _dohCache[host];
+    if (cached != null) return cached;
+
+    const endpoints = ['https://1.1.1.1/dns-query', 'https://8.8.8.8/resolve'];
+    for (final endpoint in endpoints) {
+      try {
+        final uri = Uri.parse(endpoint)
+            .replace(queryParameters: {'name': host, 'type': 'A'});
+        final request = await _dohHttp.getUrl(uri);
+        request.headers.set('accept', 'application/dns-json');
+        final response =
+            await request.close().timeout(const Duration(seconds: 5));
+        final body = await response.transform(utf8.decoder).join();
+        final decoded = jsonDecode(body);
+        final answers = decoded is Map ? decoded['Answer'] : null;
+        if (answers is! List) continue;
+
+        final addresses = <String>[];
+        for (final answer in answers) {
+          if (answer is Map && answer['type'] == 1 && answer['data'] is String) {
+            addresses.add(answer['data'] as String);
+          }
+        }
+        if (addresses.isNotEmpty) {
+          _dohCache[host] = addresses;
+          return addresses;
+        }
+      } catch (_) {
+        // Resolver irraggiungibile o risposta illeggibile: si prova il
+        // successivo, e se nessuno risponde si torna alla risoluzione normale.
+      }
+    }
+    return const [];
   }
 
   // -------------------------------------------------------------------------
@@ -444,10 +607,12 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   }
 
   Future<(String, DateTime?)> _pickRendition(
+    HttpClient client,
     String playlistUrl,
     String quality,
   ) async {
     final response = await _send(
+      client,
       'GET',
       Uri.parse(playlistUrl),
       headers: {'user-agent': _userAgent, 'referer': '$_base/'},
