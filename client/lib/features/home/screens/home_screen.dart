@@ -61,7 +61,7 @@ class HomeScreen extends ConsumerWidget {
               // rotta, e lo scheletro dice subito "sta arrivando".
               loading: () => const [
                 SliverToBoxAdapter(child: _HeroSkeleton()),
-                SliverToBoxAdapter(child: _RowsSkeleton()),
+                SliverToBoxAdapter(child: RowsSkeleton()),
               ],
               error: (error, _) => [
                 SliverFillRemaining(
@@ -402,67 +402,3 @@ class _HeroSkeleton extends StatelessWidget {
   }
 }
 
-/// Scheletro delle righe.
-///
-/// Le caselle grigie sono piu' vicine al risultato di uno spinner: mostrano
-/// gia' la forma della pagina, quindi quando arriva il contenuto non cambia la
-/// geometria e la vista non "salta" sotto gli occhi.
-class _RowsSkeleton extends StatelessWidget {
-  const _RowsSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    final horizontal = ArSpace.page(context).left;
-    final available = MediaQuery.sizeOf(context).width - horizontal * 2;
-    // Stesse soglie di `ContentRow._widthFor`: cosi' numero di caselle e
-    // larghezza combaciano con le card che compaiono al posto loro.
-    final count = switch (available) {
-      < 320 => 2,
-      < 520 => 3,
-      < 760 => 4,
-      < 1040 => 5,
-      _ => 6,
-    };
-    final cardWidth = (available - ArSpace.sm * (count - 1)) / count;
-    final cardHeight = cardWidth * 3 / 2;
-
-    // Un blocco per riga, con lo stesso padding verticale del `ContentRow`
-    // vero: l'intestazione scorre sotto il padding orizzontale di pagina, come
-    // fa il `SectionHeader`.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var row = 0; row < 3; row++)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: ArSpace.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: horizontal),
-                  child: const SkeletonBox(width: 170, height: 20),
-                ),
-                const SizedBox(height: ArSpace.sm),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: horizontal),
-                  child: Row(
-                    children: [
-                      for (var i = 0; i < count; i++) ...[
-                        Expanded(
-                          child: SkeletonBox(
-                            height: cardHeight,
-                            radius: ArRadii.card,
-                          ),
-                        ),
-                        if (i < count - 1) const SizedBox(width: ArSpace.sm),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}

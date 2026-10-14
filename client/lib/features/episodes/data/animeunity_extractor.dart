@@ -175,6 +175,21 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
           _relaySessionExpiresAt = null;
         }
         if (!e.isRetryable) rethrow;
+      } catch (_) {
+        // Un errore che non e' un [ClientExtractionFailure] (bug di un
+        // trasporto, eccezione di piattaforma inattesa) non deve fermare il
+        // giro: e' proprio quando la rete blocca la fonte che capita l'imprevisto,
+        // e il trasporto successivo puo' comunque farcela. Si registra e si
+        // continua invece di far fallire tutto al primo tentativo.
+        failure = const ClientExtractionFailure(
+            'Connessione ad AnimeUnity non riuscita. Riprova.');
+        if (attempt.relay == null) {
+          _session = null;
+          _sessionExpiresAt = null;
+        } else {
+          _relaySession = null;
+          _relaySessionExpiresAt = null;
+        }
       }
     }
 
@@ -506,6 +521,19 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     } on SocketException {
       throw const ClientExtractionFailure(
           'Connessione ad AnimeUnity non riuscita. Controlla la rete.');
+    } on IOException {
+      // `HttpException`, `TlsException` e le altre varianti di `IOException`
+      // arrivano quando una rete che blocca la fonte chiude la connessione a
+      // meta'. Senza questo ramo l'eccezione grezza sfuggirebbe al giro dei
+      // trasporti, che quindi non proverebbe mai il DNS-over-HTTPS ne' il
+      // Worker: ed e' il caso che conta sui dati mobili.
+      throw const ClientExtractionFailure(
+          'Connessione ad AnimeUnity non riuscita. Controlla la rete.');
+    } catch (_) {
+      // Rete o risposta fuori standard. Comunque ritentabile: un altro
+      // trasporto puo' riuscire.
+      throw const ClientExtractionFailure(
+          'Connessione ad AnimeUnity non riuscita. Riprova.');
     }
   }
 
@@ -580,7 +608,13 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final cached = _dohCache[host];
     if (cached != null) return cached;
 
-    const endpoints = ['https://1.1.1.1/dns-query', 'https://8.8.8.8/resolve'];
+    const endpoints = [
+      'https://1.1.1.1/dns-query',
+      // Secondo resolver Cloudflare: se il gestore blocca il primo indirizzo
+      // (ma non il secondo) la risoluzione passa comunque.
+      'https://1.0.0.1/dns-query',
+      'https://8.8.8.8/resolve',
+    ];
     for (final endpoint in endpoints) {
       try {
         final uri = Uri.parse(endpoint)

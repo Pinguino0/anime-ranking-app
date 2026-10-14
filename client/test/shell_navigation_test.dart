@@ -13,10 +13,10 @@ import 'helpers/fake_groups.dart';
 
 /// Navigazione della shell da telefono.
 ///
-/// La barra in basso ha quattro sezioni piu' la voce "Altro": Duelli, Tornei e
-/// Profilo stanno in un foglio che si apre da li'. Tenere il profilo nella
-/// barra e passare a [ArBottomBar] l'indice di sezione (il profilo e' l'ultima
-/// delle sette, indice 6) faceva scattare l'assertion
+/// La barra in basso ha quattro sezioni piu' la voce "Altro": La mia lista,
+/// Duelli, Tornei e Profilo stanno in un foglio che si apre da li'. Tenere il
+/// profilo nella barra e passare a [ArBottomBar] l'indice di sezione (il profilo
+/// e' l'ultima delle otto, indice 7) faceva scattare l'assertion
 /// "0 <= selectedIndex < destinations.length" e chiudeva l'app. Ora le sezioni
 /// fuori barra fanno capo ad "Altro", che e' l'unica voce da evidenziare,
 /// quindi l'indice resta sempre dentro la lista.
@@ -45,6 +45,7 @@ void main() {
       routes: [
         GoRoute(path: AppRoutes.home, builder: (_, _) => const ShellScreen()),
         for (final route in [
+          AppRoutes.novita,
           AppRoutes.groups,
           AppRoutes.animeSearch,
           AppRoutes.rankingPicker,
@@ -115,7 +116,7 @@ void main() {
     await tester.tap(find.text('Gruppi'));
     await tester.pumpAndSettle();
 
-    expect(barOf(tester).selectedIndex, 1);
+    expect(barOf(tester).selectedIndex, 2);
   });
 
   group('colonna laterale', () {
@@ -123,13 +124,13 @@ void main() {
     ArNavRail railOf(WidgetTester tester) =>
         tester.widget<ArNavRail>(find.byType(ArNavRail, skipOffstage: false));
 
-    testWidgets('da desktop mostra tutte le sette sezioni', (tester) async {
-      // Sette e non cinque: la colonna laterale ha spazio per tutte le voci,
-      // e toglierne due perche' "c'era anche nella barra" lascerebbe Duelli e
-      // Tornei senza un modo per aprirli da desktop.
+    testWidgets('da desktop mostra tutte le otto sezioni', (tester) async {
+      // Otto e non cinque: la colonna laterale ha spazio per tutte le voci,
+      // e toglierne alcune perche' "c'e' anche nella barra" lascerebbe Duelli,
+      // Tornei e Profilo senza un modo per aprirli da desktop.
       await pumpShell(tester, size: const Size(1200, 900));
 
-      expect(railOf(tester).destinations.length, 7);
+      expect(railOf(tester).destinations.length, 8);
       // Tutte le ricerche sono ancorate alla colonna e non a "qualunque
       // ListView": quando l'utente non ha ancora un gruppo, il contenuto
       // centrale mostra la schermata di benvenuto, che ha una lista sua e il
@@ -143,6 +144,7 @@ void main() {
         matching: find.byType(ListView),
       );
       for (final label in [
+        "Novita'",
         'Anime',
         'Gruppi',
         'Classifica',
@@ -187,13 +189,13 @@ void main() {
       await tester.tap(find.text('La mia lista'));
       await tester.pumpAndSettle();
 
-      expect(railOf(tester).selectedIndex, 3);
+      expect(railOf(tester).selectedIndex, 4);
     });
 
     testWidgets('su finestra bassa le voci restano raggiungibili', (
       tester,
     ) async {
-      // Sette voci piu' il segno non ci starebbero in una colonna fissa: senza
+      // Otto voci piu' il segno non ci starebbero in una colonna fissa: senza
       // scorrimento, l'ultima voce — quella del profilo — verrebbe tagliata via
       // e la sezione aperta sparirebbe dalla navigazione proprio mentre la si
       // sta leggendo.

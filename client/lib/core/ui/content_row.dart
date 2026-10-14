@@ -441,6 +441,70 @@ class _SkeletonBoxState extends State<SkeletonBox>
   }
 }
 
+/// Scheletro di una pagina a righe orizzontali.
+///
+/// Usa le stesse soglie di [ContentRow] per numero e larghezza delle caselle:
+/// cosi' quando arrivano i dati la geometria non cambia e la vista non "salta"
+/// sotto gli occhi. Esposto perche' lo usano piu' di una schermata (home,
+/// novita'): rifacendolo ognuna darebbe una forma leggermente diversa alla
+/// stessa attesa.
+class RowsSkeleton extends StatelessWidget {
+  const RowsSkeleton({super.key, this.rows = 3});
+
+  final int rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final horizontal = ArSpace.page(context).left;
+    final available = MediaQuery.sizeOf(context).width - horizontal * 2;
+    final count = switch (available) {
+      < 320 => 2,
+      < 520 => 3,
+      < 760 => 4,
+      < 1040 => 5,
+      _ => 6,
+    };
+    final cardWidth = (available - ArSpace.sm * (count - 1)) / count;
+    final cardHeight = cardWidth * 3 / 2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var row = 0; row < rows; row++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: ArSpace.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontal),
+                  child: const SkeletonBox(width: 170, height: 20),
+                ),
+                const SizedBox(height: ArSpace.sm),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontal),
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < count; i++) ...[
+                        Expanded(
+                          child: SkeletonBox(
+                            height: cardHeight,
+                            radius: ArRadii.card,
+                          ),
+                        ),
+                        if (i < count - 1) const SizedBox(width: ArSpace.sm),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// Scheletro di una griglia di locandine.
 ///
 /// Esposto perche' lo usano tre schermate diverse (home, ricerca, watchlist) e

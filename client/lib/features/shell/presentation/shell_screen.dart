@@ -44,7 +44,17 @@ class ShellScreen extends ConsumerStatefulWidget {
 
 class _ShellScreenState extends ConsumerState<ShellScreen> {
   static const _sections = <_NavSection>[
-    // Il catalogo sta per primo: e' la prima cosa che serve a un utente che
+    // "Novita'" sta in cima: e' la prima domanda di chi riapre l'app ("cosa e'
+    // uscito?"), prima ancora di "cosa cerco". E' una pagina a se' e non una
+    // riga della home, cosi' non si mescola con il catalogo.
+    _NavSection(
+      'Novita\'',
+      Icons.new_releases_outlined,
+      Icons.new_releases,
+      AppRoutes.novita,
+      accent: ArAccent.home,
+    ),
+    // Il catalogo sta subito dopo: e' la prima cosa che serve a un utente che
     // ha appena creato un gruppo e non ha ancora votato niente. Se fosse in
     // fondo, le sezioni piu' usate della barra starebbero nell'ordine inverso
     // rispetto a come si ragiona.
@@ -347,7 +357,7 @@ class _MoreSheet extends StatelessWidget {
             ),
             const SizedBox(height: ArSpace.xs),
             Text(
-              'Duelli, tornei e profilo: quello che non sta nella barra in basso.',
+              'La mia lista, duelli, tornei e profilo: quello che non sta nella barra in basso.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: ArColors.textMid,
               ),

@@ -21,6 +21,7 @@ import '../../features/groups/presentation/screens/group_picker_screen.dart';
 import '../../features/groups/presentation/screens/groups_list_screen.dart';
 import '../../features/groups/presentation/screens/join_group_screen.dart';
 import '../../features/history/presentation/screens/history_screen.dart';
+import '../../features/novita/presentation/screens/novita_screen.dart';
 import '../../features/profile/presentation/screens/delete_account_screen.dart';
 import '../../features/profile/presentation/screens/notification_settings_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
@@ -40,6 +41,14 @@ class AppRoutes {
   const AppRoutes._();
 
   static const String home = '/';
+
+  /// Pagina "Novita'": uscite e puntate appena aggiunte, con la ripresa.
+  ///
+  /// Una pagina a se' e non una riga in piu' nella home: risponde a "cos'e'
+  /// cambiato", mentre la home risponde a "cosa guardo". Sta in cima alle
+  /// sezioni perche' e' la prima cosa da controllare aprendo l'app.
+  static const String novita = '/novita';
+
   static const String login = '/login';
   static const String register = '/register';
 
@@ -203,6 +212,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.home,
             builder: (context, state) => const ShellHomeBody(),
+          ),
+          GoRoute(
+            path: AppRoutes.novita,
+            pageBuilder: (context, state) =>
+                arSectionRoute(child: const NovitaScreen()),
           ),
           // Sotto-gruppo dei gruppi: il percorso condivide il prefisso, quindi
           // ogni schermata di gruppo eredita la protezione dichiarata sotto.
