@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
 
@@ -159,7 +161,11 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
           quality: quality,
           providerSlug: providerSlug,
         );
-      } on ClientExtractionFailure catch (e) {
+      } on ClientExtractionFailure catch (e, s) {
+        // Log diagnostico per capire dove si blocca su dati mobili
+        // (non viene mostrato all'utente, solo per debug build)
+        debugPrint('[AU][${_transportLabel(attempt)}] failure: ${e.message}');
+        debugPrintStack(stackTrace: s);
         failure = e;
 
         // La sessione di quel trasporto puo' essere ormai rifiutata: si butta,
@@ -175,12 +181,14 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
           _relaySessionExpiresAt = null;
         }
         if (!e.isRetryable) rethrow;
-      } catch (_) {
+      } catch (err, s) {
         // Un errore che non e' un [ClientExtractionFailure] (bug di un
         // trasporto, eccezione di piattaforma inattesa) non deve fermare il
         // giro: e' proprio quando la rete blocca la fonte che capita l'imprevisto,
         // e il trasporto successivo puo' comunque farcela. Si registra e si
         // continua invece di far fallire tutto al primo tentativo.
+        debugPrint('[AU][${_transportLabel(attempt)}] unexpected: $err');
+        debugPrintStack(stackTrace: s);
         failure = const ClientExtractionFailure(
             'Connessione ad AnimeUnity non riuscita. Riprova.');
         if (attempt.relay == null) {
@@ -510,18 +518,26 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       }
 
       return _HttpResult(response.statusCode, body, setCookies);
-    } on TimeoutException {
+    } on TimeoutException catch (e, s) {
+      debugPrint('[AU][_send][${viaRelay ? 'RELAY' : 'STD'}] TimeoutException: $e');
+      debugPrintStack(stackTrace: s);
       throw const ClientExtractionFailure('AnimeUnity non risponde. Riprova.');
-    } on HandshakeException {
+    } on HandshakeException catch (e, s) {
+      debugPrint('[AU][_send][${viaRelay ? 'RELAY' : 'STD'}] HandshakeException: $e');
+      debugPrintStack(stackTrace: s);
       // Tipico di una rete che intercetta la fonte: la connessione arriva a un
       // server che non ha il certificato giusto. Ritentabile, perche' il giro
       // con il DNS-over-HTTPS — o quello via Worker — puo' aggirarla.
       throw const ClientExtractionFailure(
           'Connessione sicura ad AnimeUnity non riuscita. Riprova.');
-    } on SocketException {
+    } on SocketException catch (e, s) {
+      debugPrint('[AU][_send][${viaRelay ? 'RELAY' : 'STD'}] SocketException: $e');
+      debugPrintStack(stackTrace: s);
       throw const ClientExtractionFailure(
           'Connessione ad AnimeUnity non riuscita. Controlla la rete.');
-    } on IOException {
+    } on IOException catch (e, s) {
+      debugPrint('[AU][_send][${viaRelay ? 'RELAY' : 'STD'}] IOException: $e');
+      debugPrintStack(stackTrace: s);
       // `HttpException`, `TlsException` e le altre varianti di `IOException`
       // arrivano quando una rete che blocca la fonte chiude la connessione a
       // meta'. Senza questo ramo l'eccezione grezza sfuggirebbe al giro dei
@@ -529,12 +545,19 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       // Worker: ed e' il caso che conta sui dati mobili.
       throw const ClientExtractionFailure(
           'Connessione ad AnimeUnity non riuscita. Controlla la rete.');
-    } catch (_) {
+    } catch (e, s) {
+      debugPrint('[AU][_send][${viaRelay ? 'RELAY' : 'STD'}] catch: $e');
+      debugPrintStack(stackTrace: s);
       // Rete o risposta fuori standard. Comunque ritentabile: un altro
       // trasporto puo' riuscire.
       throw const ClientExtractionFailure(
           'Connessione ad AnimeUnity non riuscita. Riprova.');
     }
+  }
+
+  static String _transportLabel(({HttpClient client, Uri? relay}) a) {
+    if (a.relay != null) return 'RELAY';
+    return identical(a.client, _bypassHttp) ? 'DOH+IP' : 'DIRECT';
   }
 
   // -------------------------------------------------------------------------
@@ -576,18 +599,25 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       Object? lastError;
       for (final target in targets) {
         try {
+          debugPrint('[AU][DOH] trying $target:$port for $host');
           final task = await Socket.startConnect(target, port);
-          if (uri.scheme != 'https') return task;
+          if (uri.scheme != 'https') {
+            debugPrint('[AU][DOH] connected (http) to $target');
+            return task;
+          }
 
           final raw = await task.socket;
           // `host` (non l'IP) e' l'SNI: il certificato resta valido e il
           // server sa quale sito si sta chiedendo.
           final secure = await SecureSocket.secure(raw, host: host);
+          debugPrint('[AU][DOH] connected+tls to $target (SNI=$host)');
           return ConnectionTask.fromSocket(
             Future<SecureSocket>.value(secure),
             task.cancel,
           );
-        } catch (error) {
+        } catch (error, s) {
+          debugPrint('[AU][DOH] failed $target: $error');
+          debugPrintStack(stackTrace: s);
           lastError = error;
         }
       }
@@ -636,6 +666,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         }
         if (addresses.isNotEmpty) {
           _dohCache[host] = addresses;
+          debugPrint('[AU][DoH] $host -> ${addresses.join(',')} (via $endpoint)');
           return addresses;
         }
       } catch (_) {
