@@ -10,8 +10,16 @@ il telefono non riesce più a risolvere la fonte. Il flusso video invece arriva 
 un altro punto e il video continua ad andare diretto dal telefono.
 
 I server "normali" (datacenter) vengono respinti da Cloudflare con **403**. Un Cloudflare
-Worker gira *dentro* la rete Cloudflare e, nella pratica, spesso non subisce il challenge.
-È da verificare: per questo c'è la rotta di test.
+Worker gira *dentro* la rete Cloudflare, ma **AnimeUnity lo respinge lo stesso**: la rete
+Cloudflare in cui gira un Worker gratuito è su ASN di datacenter, cioè gli stessi indirizzi
+che AnimeUnity banna. Verificato: la radice, `/info_api/...` e `/embed-url/...` rispondono
+`403` con il challenge (`Just a moment...`) o `error code 1005`.
+
+Quindi questa strada, da sola, **non risolve** il blocco di AnimeUnity: serve un proxy
+residenziale a pagamento oppure una VPN sul telefono. La strada che l'app usa davvero è il
+bypass fatto **dal telefono** (DNS-over-HTTPS + IP reale di Cloudflare): lì la richiesta
+parte dall'IP residenziale dell'utente, che Cloudflare non banna. Il Worker resta nel codice
+per completezza: con un provider diverso può ancora essere la terza via.
 
 ## Come si mette online (5 minuti, nessun programma da installare)
 
@@ -33,8 +41,9 @@ Apri l'indirizzo nel browser (basta la radice). Risponde un JSON:
 
 - `"ok": true` → il Worker raggiunge AnimeUnity: la strada è percorribile, si passa
   a collegarlo all'app.
-- `"ok": false` con `"cloudflare_challenge": true` → Cloudflare blocca anche il Worker:
-  servirà un'altra strada (proxy residenziale a pagamento o VPN sul telefono).
+- `"ok": false` con `"cloudflare_challenge": true` → Cloudflare blocca anche il Worker.
+  È il caso di AnimeUnity con l'account gratuito: servirà un'altra strada (proxy
+  residenziale a pagamento o VPN sul telefono).
 
 ## Rotte
 
