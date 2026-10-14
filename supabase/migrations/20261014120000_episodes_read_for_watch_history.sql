@@ -1,0 +1,34 @@
+-- ---------------------------------------------------------------------------
+-- 20261014120000_episodes_read_for_watch_history
+--
+-- Restituisce a `authenticated` il privilegio di lettura su `episodes`, tolto
+-- dalla 20261005120000, perche' le RPC personali `watch_history` e
+-- `continue_watching` non possono funzionare senza.
+--
+-- Il guasto che ripara
+-- --------------------
+-- La 20261005120000 revoco' `episodes`/`episode_sources` da `authenticated`
+-- per obbligare il client a leggere gli episodi solo attraverso
+-- `episodes_for_anime` e `episode_sources_list` (SECURITY DEFINER). Ma
+-- `watch_history` e `continue_watching` (20261013184908) sono SECURITY INVOKER
+-- e leggono `episodes` per costruire l'elenco: senza il privilegio di tabella
+-- fallivano con `42501 permission denied for table episodes`. Il sintomo era la
+-- rotella infinita in Cronologia e Preferiti: la RPC risponde 403, il client
+-- ritenta (Riverpod `defaultRetry`), e la schermata non arriva mai al
+-- contenuto.
+--
+-- Perche' una grant e non SECURITY DEFINER
+-- ----------------------------------------
+-- La policy RLS su `episodes` ("episodes: lettura autenticati": SELECT a
+-- `authenticated`, `qual = true`) permette gia' a qualunque utente collegato di
+-- leggere ogni episodio. La revoca non proteggeva quindi nessun dato: toglieva
+-- solo la via diretta, e nel farlo lasciava le due RPC personali senza il
+-- permesso che serve a loro. Restituire il SELECT riporta la tabella
+-- esattamente a cio' che la RLS consente, senza allargare nulla.
+-- `episode_sources` resta revocata: quella si legge solo via RPC, come prima.
+--
+-- Idempotente: riapplicarla su un database che ha gia' il privilegio non
+-- cambia niente.
+-- ---------------------------------------------------------------------------
+
+grant select on public.episodes to authenticated;
