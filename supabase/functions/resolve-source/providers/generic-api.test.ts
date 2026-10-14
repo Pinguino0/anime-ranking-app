@@ -339,6 +339,9 @@ Deno.test('POST: il body porta i metadati anime per i provider di backup', async
           japaneseTitle: '進撃の巨人',
           synonyms: ['Attack on Titan', "L'attacco dei Giganti"],
           malId: 16498,
+          anilistId: 16498,
+          titles: ['Shingeki no Kyojin', '進撃の巨人', 'Attack on Titan'],
+          year: 2013,
         }
         await genericApiResolver.resolve(request)
 
@@ -379,6 +382,9 @@ Deno.test('GET: l\'URL porta numero episodio, titolo e mal_id', async () => {
           japaneseTitle: null,
           synonyms: ['Attack on Titan'],
           malId: 16498,
+          anilistId: 16498,
+          titles: ['Shingeki no Kyojin', 'Attack on Titan'],
+          year: 2013,
         }
         await genericApiResolver.resolve(request)
 

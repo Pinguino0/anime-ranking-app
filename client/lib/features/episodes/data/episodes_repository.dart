@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
 import '../domain/intro_markers.dart';
+import 'animesaturn_extractor.dart';
 import 'animeunity_extractor.dart';
 
 /// Una risoluzione richiesta e non riuscita.
@@ -88,8 +89,10 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
     this._client, {
     ClientSourceExtractor? clientExtractor,
     ClientEpisodeCounts? episodeCounts,
+    BackupSourceExtractor? backupExtractor,
   })  : _clientExtractor = clientExtractor ?? AnimeUnityExtractor(),
-        _episodeCounts = episodeCounts ?? AnimeUnityExtractor();
+        _episodeCounts = episodeCounts ?? AnimeUnityExtractor(),
+        _backupExtractor = backupExtractor ?? AnimeSaturnExtractor();
 
   final SupabaseClient _client;
 
@@ -103,6 +106,13 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
   /// sincronizzazione e' iniettata a parte nei test, dove la si vuole
   /// controllare senza dover fingere anche una risoluzione video.
   final ClientEpisodeCounts _episodeCounts;
+
+  /// Chi sa riprodurre lo stesso episodio su una fonte di riserva.
+  ///
+  /// Serve quando l'estrazione sul telefono fallisce per un motivo di rete:
+  /// alcuni operatori mobili bloccano AnimeUnity ma non AnimeSaturn. Iniettata
+  /// a parte perche' i test possono fingere la riserva senza toccare la rete.
+  final BackupSourceExtractor _backupExtractor;
 
   /// Id dell'utente collegato.
   ///
@@ -214,7 +224,20 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
       // ha l'IP residenziale dell'utente. Non e' un errore: e' la risposta
       // giusta per queste fonti.
       if (row['resolution'] == 'client') {
-        return await _extractOnDevice(sourceId, row);
+        try {
+          return await _extractOnDevice(sourceId, row);
+        } on SourceResolutionFailure catch (error) {
+          // L'estrazione sul telefono e' fallita per un motivo che puo' essere
+          // di rete (l'operatore mobile blocca il sito della fonte primaria):
+          // prima di arrendersi si prova la fonte di riserva. Un fallimento
+          // *non* ritentabile (l'episodio non esiste) non ha una riserva piu'
+          // fortunata, quindi non si prova nemmeno.
+          if (!error.isRetryable) rethrow;
+
+          final backup = await _extractBackup(sourceId, row);
+          if (backup != null) return backup;
+          rethrow;
+        }
       }
 
       final resolved = ResolvedSource.parse(row);
@@ -280,6 +303,61 @@ class SupabaseEpisodesRepository implements EpisodesRepository {
       );
     } on ClientExtractionFailure catch (e) {
       throw SourceResolutionFailure(e.message, isRetryable: e.isRetryable);
+    }
+  }
+
+  /// Prova a riprodurre lo stesso episodio su una fonte di riserva.
+  ///
+  /// Ritorna `null` (e non solleva) quando la riserva non c'e' o non riesce:
+  /// chi chiama deve mostrare il motivo originale, non un secondo errore che
+  /// parlerebbe di un provider che l'utente non ha mai scelto.
+  Future<ResolvedSource?> _extractBackup(
+    String sourceId,
+    Map<String, dynamic> row,
+  ) async {
+    final rawEpisode = row['episode_number'];
+    final episodeNumber = rawEpisode is int
+        ? rawEpisode
+        : rawEpisode is num
+            ? rawEpisode.toInt()
+            : int.tryParse('$rawEpisode');
+    if (episodeNumber == null || episodeNumber < 1) return null;
+
+    final titles = [
+      for (final title in (row['titles'] as List? ?? const []))
+        if (title is String && title.trim().isNotEmpty) title.trim(),
+    ];
+    if (titles.isEmpty) return null;
+
+    // `anilist_id` arriva come numero JSON, non come stringa: leggerlo con
+    // `_value` (che accetta solo stringhe) lo perderebbe, e senza di esso la
+    // riserva non avrebbe un aggancio esatto e rinuncerebbe a riprodurre.
+    final rawAnilist = row['anilist_id'];
+    final anilistId = rawAnilist == null
+        ? null
+        : rawAnilist is num
+            ? rawAnilist.toInt().toString()
+            : rawAnilist.toString();
+
+    final rawYear = row['year'];
+    final year = rawYear is int
+        ? rawYear
+        : rawYear is num
+            ? rawYear.toInt()
+            : int.tryParse('$rawYear');
+
+    try {
+      return await _backupExtractor.extract(
+        sourceId: sourceId,
+        titles: titles,
+        episodeNumber: episodeNumber,
+        anilistId: anilistId,
+        year: year,
+        language: _value(row['language']),
+        quality: _value(row['quality']),
+      );
+    } catch (_) {
+      return null;
     }
   }
 

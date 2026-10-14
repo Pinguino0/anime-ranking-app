@@ -285,7 +285,7 @@ async function readEpisodeMeta(episodeId: unknown): Promise<AnimeEpisodeMeta | u
   const { data, error } = await supabase()
     .from('episodes')
     .select(
-      'episode_num, anime:anime_id ( title, japanese_title, synonyms, external_id )',
+      'episode_num, anime:anime_id ( title, japanese_title, synonyms, external_id, year )',
     )
     .eq('id', episodeId)
     .maybeSingle()
@@ -303,22 +303,37 @@ async function readEpisodeMeta(episodeId: unknown): Promise<AnimeEpisodeMeta | u
   // L'episodio senza anime non si risolve altrove: non c'e' titolo da cercare.
   if (!animeRow) return undefined
 
+  const externalId =
+    typeof animeRow.external_id === 'string' ? animeRow.external_id.trim() : ''
+  const numericExternalId =
+    /^\d+$/.test(externalId) && externalId !== '' ? Number(externalId) : null
+
+  const title = typeof animeRow.title === 'string' ? animeRow.title.trim() : ''
+  const japaneseTitle =
+    typeof animeRow.japanese_title === 'string'
+      ? animeRow.japanese_title.trim()
+      : ''
+  const synonyms = Array.isArray(animeRow.synonyms)
+    ? animeRow.synonyms.filter((s: unknown): s is string => typeof s === 'string')
+    : []
+
+  // I titoli servono ai fallback per cercare l'anime altrove: si tolgono i
+  // vuoti e i duplicati una volta qui, cosi' ogni provider riceve la stessa
+  // lista pulita invece di ripetere la stessa normalizzazione.
+  const titles = [...new Set(
+    [title, japaneseTitle, ...synonyms].map((t) => t.trim()).filter((t) => t !== ''),
+  )]
+
   return {
     episodeNumber:
       data && typeof data.episode_num === 'number' ? data.episode_num : null,
-    title: typeof animeRow.title === 'string' ? animeRow.title : null,
-    japaneseTitle:
-      typeof animeRow.japanese_title === 'string'
-        ? animeRow.japanese_title
-        : null,
-    synonyms: Array.isArray(animeRow.synonyms)
-      ? animeRow.synonyms.filter((s: unknown): s is string => typeof s === 'string')
-      : [],
-    malId:
-      typeof animeRow.external_id === 'string' &&
-        /^\d+$/.test(animeRow.external_id)
-        ? Number(animeRow.external_id)
-        : null,
+    title: title !== '' ? title : null,
+    japaneseTitle: japaneseTitle !== '' ? japaneseTitle : null,
+    synonyms,
+    malId: numericExternalId,
+    anilistId: numericExternalId,
+    titles,
+    year: typeof animeRow.year === 'number' ? animeRow.year : null,
   }
 }
 
@@ -355,6 +370,16 @@ function clientResolutionPayload(
     // Arriva dai metadati, che sono l'unico posto dove sta.
     episode_number: anime?.episodeNumber ?? null,
     quality: source.quality,
+    // Cosa serve a ritrovare lo stesso episodio su una fonte di riserva se
+    // l'estrazione sul telefono fallisce (alcuni operatori mobili bloccano il
+    // sito della fonte primaria). `anilist_id` e' l'aggancio esatto: il fallback
+    // confronta l'id AniList della pagina candidata con questo, e non il titolo,
+    // per non rischiare di riprodurre l'anime sbagliato. `titles` serve solo a
+    // cercare i candidati.
+    anilist_id: anime?.anilistId ?? null,
+    titles: anime?.titles ?? [],
+    year: anime?.year ?? null,
+    language: source.language,
     provider: {
       slug: provider.slug,
       label: provider.label,

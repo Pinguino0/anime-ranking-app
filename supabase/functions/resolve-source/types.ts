@@ -66,6 +66,26 @@ export interface AnimeEpisodeMeta {
 
   /** `anime.external_id`, quando la fonte esterna e' MyAnimeList. */
   malId: number | null
+
+  /**
+   * `anime.external_id` quando la fonte esterna e' AniList.
+   *
+   * Oggi il catalogo e' costruito su AniList, quindi questo e' l'identificativo
+   * affidabile dell'opera. Serve ai fallback che devono ritrovare lo *stesso*
+   * anime altrove senza agganciarlo per titolo: AnimeSaturn, per esempio,
+   * pubblica il link AniList nella pagina dell'anime, e confrontare quell'id
+   * dice con certezza se la pagina e' la stessa opera.
+   */
+  anilistId: number | null
+
+  /**
+   * Tutti i titoli utili a cercare l'anime altrove, gia' ripuliti e senza
+   * duplicati: titolo principale, giapponese e sinonimi.
+   */
+  titles: string[]
+
+  /** `anime.year`: l'anno di inizio, per disambiguare le stagioni. */
+  year: number | null
 }
 
 /** Cosa arriva al resolver. */
