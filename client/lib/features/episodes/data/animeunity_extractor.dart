@@ -4,6 +4,8 @@ import 'dart:io';
 
 import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
+import 'chromium_http.dart';
+import 'doh_bypass.dart';
 
 /// Una risoluzione lato client non riuscita.
 ///
@@ -60,9 +62,12 @@ abstract interface class ClientEpisodeCounts {
 ///   4. `GET <player>` e lettura di `window.masterPlaylist`;
 ///   5. `GET <playlist>` per scegliere la rendition richiesta.
 ///
-/// Tutto con `dart:io`, senza pacchetti HTTP aggiuntivi: i cookie di sessione si
-/// leggono e si rimandano a mano, che e' l'unica cosa che un client HTTP
-/// generico non fa da solo.
+/// Le richieste possono viaggiare su piu' strade, provate in ordine: il motore
+/// di rete di Chromium, `dart:io`, `dart:io` con la risoluzione via
+/// DNS-over-HTTPS, il Worker. La prima serve sulle reti mobili che filtrano il
+/// nome del sito, le ultime coprono i casi di DNS falsato e di indirizzo
+/// bloccato. Sulla rete di casa il primo tentativo che riesce e' `dart:io`, e
+/// tutto il resto non viene nemmeno toccato.
 class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts {
   AnimeUnityExtractor();
 
@@ -81,19 +86,25 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   static final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 15);
 
+  /// Il trasporto diretto: `dart:io`, senza sorprese.
+  static final _Transport _io = _IoTransport(() => _http);
+
+  /// Il trasporto che passa dal motore di rete di Chromium (Cronet).
+  static _Transport? _chromiumTransport;
+
+  /// `null` quando la piattaforma non ha Cronet (tutto tranne Android) o quando
+  /// il motore si e' rifiutato di partire: in quel caso restano `dart:io`, il
+  /// DNS-over-HTTPS e il Worker.
+  static _Transport? get _chromium {
+    if (!ChromiumHttp.supported || ChromiumHttp.unavailable) return null;
+    return _chromiumTransport ??= const _ChromiumTransport();
+  }
+
   /// Il client che risolve gli indirizzi via DNS-over-HTTPS.
   ///
   /// Viene costruito solo se serve, cioe' quando un'estrazione normale
   /// fallisce: sulla maggioranza delle reti non tocca mai la rete.
   static HttpClient? _bypassHttpClient;
-
-  /// Il client usato per parlare con i resolver DoH. Non ha nessun
-  /// `connectionFactory`, perche' altrimenti si risolverebbe ricorsivamente.
-  static final HttpClient _dohHttp = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 8);
-
-  /// Gli IP risolti via DoH, per host. Una risoluzione per host per processo.
-  static final Map<String, List<String>> _dohCache = {};
 
   /// Indirizzi Cloudflare noti che servono il sito. Si tentano per ultimi,
   /// quando il DoH non risponde: sono gli stessi a cui puntano i domini
@@ -105,16 +116,26 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     '172.67.166.248',
   ];
 
-  static _Session? _session;
-  static DateTime? _sessionExpiresAt;
-
-  /// La sessione comprata passando dal Worker.
+  /// Le sessioni comprate, una per trasporto.
   ///
-  /// Tenuta a parte da quella diretta: il token CSRF e' legato ai cookie di
-  /// quella sessione, e mescolarli (cookie via relay, token via rete diretta)
-  /// farebbe rispondere 419. Chi passa dal relay usa solo questa.
-  static _Session? _relaySession;
-  static DateTime? _relaySessionExpiresAt;
+  /// Tenute separate perche' il token CSRF e' legato ai cookie di *quella*
+  /// sessione: mescolarli (cookie di un trasporto e token di un altro) farebbe
+  /// rispondere 419. Il Worker ha la sua, il motore di Chromium la sua.
+  static final Map<String, _Session> _sessions = {};
+  static final Map<String, DateTime> _sessionExpiry = {};
+
+  /// La chiave della sessione di un tentativo.
+  ///
+  /// Il Worker non e' un trasporto a se': e' `dart:io` che passa da un altro
+  /// indirizzo, quindi la sua sessione va tenuta a parte.
+  static String _sessionKey(_Transport transport, Uri? relay) =>
+      relay != null ? 'relay' : transport.sessionKey;
+
+  static void _forgetSession(_Transport transport, Uri? relay) {
+    final key = _sessionKey(transport, relay);
+    _sessions.remove(key);
+    _sessionExpiry.remove(key);
+  }
 
   /// Il Worker configurato in fase di build, se c'e'.
   static Uri? get _relay {
@@ -134,24 +155,31 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     String? quality,
     String? providerSlug,
   }) async {
-    // Tre trasporti, dal piu' economico al piu' robusto:
-    //   1. rete diretta;
-    //   2. rete diretta con DNS-over-HTTPS e IP vero (aggira il DNS del gestore);
-    //   3. Worker Cloudflare (aggira il blocco IP/SNI, es. Piracy Shield su dati
-    //      mobili). Si tenta solo se configurato in fase di build.
+    // Quattro trasporti, dal piu' affidabile al piu' di riserva:
+    //   1. il motore di rete di Chromium, quando c'e' (Android): e' lo stesso
+    //      stack del browser e l'unico che supera un filtro che legge il nome
+    //      del sito nell'handshake TLS;
+    //   2. rete diretta con `dart:io`, che sulle reti normali va benissimo ed e'
+    //      il piu' economico;
+    //   3. rete diretta con DNS-over-HTTPS e indirizzo vero, IPv6 per primo
+    //      (aggira il DNS falsato, non un filtro TLS);
+    //   4. Worker Cloudflare (aggira un blocco di indirizzo). Si tenta solo se
+    //      configurato in fase di build.
     // Un fallimento "non ritentabile" (episodio inesistente, indirizzo non
     // riconosciuto) ferma subito: cambiare strada non lo risolverebbe.
-    final attempts = <({HttpClient client, Uri? relay})>[
-      (client: _http, relay: null),
-      (client: _bypassHttp, relay: null),
-      if (_relay != null) (client: _http, relay: _relay),
+    final chromium = _chromium;
+    final attempts = <({_Transport transport, Uri? relay})>[
+      if (chromium != null) (transport: chromium, relay: null),
+      (transport: _io, relay: null),
+      (transport: _bypass, relay: null),
+      if (_relay != null) (transport: _io, relay: _relay),
     ];
 
     ClientExtractionFailure? failure;
     for (final attempt in attempts) {
       try {
         return await _extract(
-          client: attempt.client,
+          transport: attempt.transport,
           relay: attempt.relay,
           sourceId: sourceId,
           canonicalUrl: canonicalUrl,
@@ -167,13 +195,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         // una nuova invece di ripetere lo stesso errore. Su un errore non
         // ritentabile ci si ferma: la sessione non c'entra con un episodio
         // inesistente.
-        if (attempt.relay == null) {
-          _session = null;
-          _sessionExpiresAt = null;
-        } else {
-          _relaySession = null;
-          _relaySessionExpiresAt = null;
-        }
+        _forgetSession(attempt.transport, attempt.relay);
         if (!e.isRetryable) rethrow;
       } catch (_) {
         // Un errore che non e' un [ClientExtractionFailure] (bug di un
@@ -183,13 +205,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         // continua invece di far fallire tutto al primo tentativo.
         failure = const ClientExtractionFailure(
             'Connessione ad AnimeUnity non riuscita. Riprova.');
-        if (attempt.relay == null) {
-          _session = null;
-          _sessionExpiresAt = null;
-        } else {
-          _relaySession = null;
-          _relaySessionExpiresAt = null;
-        }
+        _forgetSession(attempt.transport, attempt.relay);
       }
     }
 
@@ -214,27 +230,40 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       queryParameters: {'start_range': '1', 'end_range': '1'},
     );
 
-    // Best-effort: si prova la rete diretta e, se configurato, il Worker. Un
-    // conteggio mancante non cambia cio' che l'utente vede, quindi qui non
-    // solleva mai.
-    for (final relay in <Uri?>[null, if (_relay != null) _relay]) {
+    // Best-effort: si prova il motore di Chromium, poi la rete diretta e, se
+    // configurato, il Worker. Un conteggio mancante non cambia cio' che l'utente
+    // vede, quindi qui non solleva mai.
+    final chromium = _chromium;
+    final attempts = <({_Transport transport, Uri? relay})>[
+      if (chromium != null) (transport: chromium, relay: null),
+      (transport: _io, relay: null),
+      if (_relay != null) (transport: _io, relay: _relay),
+    ];
+
+    for (final attempt in attempts) {
       try {
-        final session = await _getSession(_http, relay: relay);
-        final info =
-            await _apiJson(_http, uri, _apiHeaders(session), relay: relay);
+        final transport = attempt.transport;
+        final session = await _getSession(transport, relay: attempt.relay);
+        final info = await _apiJson(
+          transport,
+          uri,
+          _apiHeaders(session, withCookies: !transport.managesCookies),
+          relay: attempt.relay,
+        );
         final raw = info['episodes_count'];
         if (raw is num) return raw.toInt();
         if (raw is String) return int.tryParse(raw);
         return null;
       } catch (_) {
         // Trasporto non disponibile: si prova il successivo.
+        _forgetSession(attempt.transport, attempt.relay);
       }
     }
     return null;
   }
 
   Future<ResolvedSource> _extract({
-    required HttpClient client,
+    required _Transport transport,
     Uri? relay,
     required String sourceId,
     required String canonicalUrl,
@@ -256,7 +285,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
 
     final wanted = _requestedQuality(quality);
 
-    final session = await _getSession(client, relay: relay);
+    final session = await _getSession(transport, relay: relay);
 
     final infoUri = Uri.parse('$_base/info_api/$animeId/$episodeNumber').replace(
       queryParameters: {
@@ -265,7 +294,12 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       },
     );
 
-    final info = await _apiJson(client, infoUri, _apiHeaders(session), relay: relay);
+    final info = await _apiJson(
+      transport,
+      infoUri,
+      _apiHeaders(session, withCookies: !transport.managesCookies),
+      relay: relay,
+    );
     final episodes = info['episodes'];
     final list = episodes is List ? episodes : const [];
 
@@ -293,11 +327,11 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final animePage = '$_base/anime/$episodeId-x';
 
     final embedResponse = await _send(
-      client,
+      transport,
       'GET',
       Uri.parse('$_base/embed-url/$episodeId'),
       headers: {
-        ..._apiHeaders(session),
+        ..._apiHeaders(session, withCookies: !transport.managesCookies),
         'accept': 'text/plain',
         'referer': animePage,
       },
@@ -315,7 +349,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     }
 
     final page = await _send(
-      client,
+      transport,
       'GET',
       Uri.parse(embedUrl),
       headers: {
@@ -332,7 +366,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final config = _parseMasterPlaylist(page.body);
     final playlistUrl = _buildPlaylistUrl(config);
     final (hlsUrl, expiresAt) =
-        await _pickRendition(client, playlistUrl, wanted);
+        await _pickRendition(transport, playlistUrl, wanted);
 
     return ResolvedSource(
       sourceId: sourceId,
@@ -352,16 +386,16 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   // Sessione e chiamate
   // -------------------------------------------------------------------------
 
-  Future<_Session> _getSession(HttpClient client, {Uri? relay}) async {
-    final cached = relay == null ? _session : _relaySession;
-    final expiresAt =
-        relay == null ? _sessionExpiresAt : _relaySessionExpiresAt;
+  Future<_Session> _getSession(_Transport transport, {Uri? relay}) async {
+    final key = _sessionKey(transport, relay);
+    final cached = _sessions[key];
+    final expiresAt = _sessionExpiry[key];
     if (cached != null && expiresAt != null && DateTime.now().isBefore(expiresAt)) {
       return cached;
     }
 
     final response = await _send(
-      client,
+      transport,
       'GET',
       Uri.parse('$_base/'),
       headers: {'user-agent': _userAgent, 'accept': 'text/html'},
@@ -372,19 +406,17 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
           'AnimeUnity ha risposto HTTP ${response.status}.');
     }
 
-    final cookies = response.setCookies
-        .map((c) => c.split(';').first.trim())
-        .where((c) => c.isNotEmpty)
-        .toList();
-    final cookie = cookies.join('; ');
+    final token = _xsrfToken(response.setCookies);
 
-    String? token;
-    for (final raw in response.setCookies) {
-      final match = RegExp('XSRF-TOKEN=([^;]+)').firstMatch(raw);
-      if (match != null) {
-        token = Uri.decodeComponent(match.group(1)!);
-        break;
-      }
+    // Il motore di Chromium tiene i cookie da solo (li rimanda lui, come farebbe
+    // una finestra di navigazione) e le richieste di lettura non hanno bisogno
+    // del token CSRF: se manca si prosegue lo stesso, invece di fermare
+    // un'estrazione che il server sta gia' servendo.
+    if (transport.managesCookies) {
+      final session = _Session('', token ?? '');
+      _sessions[key] = session;
+      _sessionExpiry[key] = DateTime.now().add(_sessionTtl);
+      return session;
     }
 
     if (token == null || token.isEmpty) {
@@ -392,48 +424,56 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
           'AnimeUnity non ha rilasciato il token CSRF.');
     }
 
-    final session = _Session(cookie, token);
-    if (relay == null) {
-      _session = session;
-      _sessionExpiresAt = DateTime.now().add(_sessionTtl);
-    } else {
-      _relaySession = session;
-      _relaySessionExpiresAt = DateTime.now().add(_sessionTtl);
-    }
+    final cookies = response.setCookies
+        .map((c) => c.split(';').first.trim())
+        .where((c) => c.isNotEmpty)
+        .toList();
+
+    final session = _Session(cookies.join('; '), token);
+    _sessions[key] = session;
+    _sessionExpiry[key] = DateTime.now().add(_sessionTtl);
     return session;
   }
 
-  Map<String, String> _apiHeaders(_Session session) => {
+  /// Il valore del cookie `XSRF-TOKEN`, se le risposte ne portano uno.
+  ///
+  /// I cookie possono arrivare tutti su una riga sola (il motore di Chromium li
+  /// unisce): cercare per nome trova il token in entrambe le forme.
+  static String? _xsrfToken(List<String> setCookies) {
+    for (final raw in setCookies) {
+      final match = RegExp('XSRF-TOKEN=([^;,]+)').firstMatch(raw);
+      if (match != null) return Uri.decodeComponent(match.group(1)!);
+    }
+    return null;
+  }
+
+  Map<String, String> _apiHeaders(_Session session, {bool withCookies = true}) =>
+      {
         'user-agent': _userAgent,
         'accept': 'application/json',
         'x-requested-with': 'XMLHttpRequest',
-        'x-xsrf-token': session.token,
-        if (session.cookie.isNotEmpty) 'cookie': session.cookie,
+        if (session.token.isNotEmpty) 'x-xsrf-token': session.token,
+        if (withCookies && session.cookie.isNotEmpty) 'cookie': session.cookie,
       };
 
   Future<Map<String, dynamic>> _apiJson(
-    HttpClient client,
+    _Transport transport,
     Uri uri,
     Map<String, String> headers, {
     bool retried = false,
     Uri? relay,
   }) async {
     final response =
-        await _send(client, 'GET', uri, headers: headers, relay: relay);
+        await _send(transport, 'GET', uri, headers: headers, relay: relay);
 
     // 419: la sessione non vale piu'. Se ne compra una nuova e si rifa' la
     // richiesta una volta sola — insistere all'infinito su una sessione che il
     // server continua a rifiutare nasconderebbe un problema vero.
     if (response.status == 419 && !retried) {
-      if (relay == null) {
-        _session = null;
-        _sessionExpiresAt = null;
-      } else {
-        _relaySession = null;
-        _relaySessionExpiresAt = null;
-      }
-      final fresh = await _getSession(client, relay: relay);
-      return _apiJson(client, uri, _apiHeaders(fresh),
+      _forgetSession(transport, relay);
+      final fresh = await _getSession(transport, relay: relay);
+      return _apiJson(transport, uri,
+          _apiHeaders(fresh, withCookies: !transport.managesCookies),
           retried: true, relay: relay);
     }
 
@@ -466,7 +506,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       );
 
   Future<_HttpResult> _send(
-    HttpClient client,
+    _Transport transport,
     String method,
     Uri uri, {
     Map<String, String> headers = const {},
@@ -479,27 +519,19 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
     final target = viaRelay ? _withRelay(relay, uri) : uri;
 
     try {
-      final request = await client.openUrl(method, target);
-      headers.forEach(request.headers.set);
-      final response = await request.close().timeout(const Duration(seconds: 20));
-      final body = await response.transform(utf8.decoder).join();
-
-      final setCookies = <String>[];
-      response.headers.forEach((name, values) {
-        if (name.toLowerCase() == 'set-cookie') setCookies.addAll(values);
-      });
+      final result = await transport.send(method, target, headers);
 
       // Dietro il Worker i `Set-Cookie` non possono viaggiare come header
       // normali (il browser/app li leggerebbe di un altro dominio): il Worker li
       // rimette nel header `x-set-cookie` come lista JSON.
       if (viaRelay) {
-        final rawCookies = response.headers.value('x-set-cookie');
+        final rawCookies = result.headers['x-set-cookie'];
         if (rawCookies != null && rawCookies.isNotEmpty) {
           try {
             final decoded = jsonDecode(rawCookies);
             if (decoded is List) {
               for (final entry in decoded) {
-                if (entry is String) setCookies.add(entry);
+                if (entry is String) result.setCookies.add(entry);
               }
             }
           } on FormatException {
@@ -509,13 +541,13 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
         }
       }
 
-      return _HttpResult(response.statusCode, body, setCookies);
+      return result;
     } on TimeoutException {
       throw const ClientExtractionFailure('AnimeUnity non risponde. Riprova.');
     } on HandshakeException {
       // Tipico di una rete che intercetta la fonte: la connessione arriva a un
-      // server che non ha il certificato giusto. Ritentabile, perche' il giro
-      // con il DNS-over-HTTPS — o quello via Worker — puo' aggirarla.
+      // server che non ha il certificato giusto. Ritentabile, perche' il motore
+      // di Chromium — o il DNS-over-HTTPS, o il Worker — puo' aggirarla.
       throw const ClientExtractionFailure(
           'Connessione sicura ad AnimeUnity non riuscita. Riprova.');
     } on SocketException {
@@ -525,7 +557,7 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
       // `HttpException`, `TlsException` e le altre varianti di `IOException`
       // arrivano quando una rete che blocca la fonte chiude la connessione a
       // meta'. Senza questo ramo l'eccezione grezza sfuggirebbe al giro dei
-      // trasporti, che quindi non proverebbe mai il DNS-over-HTTPS ne' il
+      // trasporti, che quindi non proverebbe mai il motore di Chromium ne' il
       // Worker: ed e' il caso che conta sui dati mobili.
       throw const ClientExtractionFailure(
           'Connessione ad AnimeUnity non riuscita. Controlla la rete.');
@@ -541,110 +573,19 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   // Aggiramento dei blocchi di rete
   // -------------------------------------------------------------------------
 
-  static HttpClient get _bypassHttp =>
-      _bypassHttpClient ??= _buildBypassClient();
-
   /// Il client che scavalca i blocchi DNS/IP del gestore.
   ///
-  /// Differenza dall'`HttpClient` normale: prima di ogni connessione risolve
-  /// l'host con DNS-over-HTTPS e si collega all'indirizzo vero, poi fa
-  /// l'handshake TLS indicando il nome giusto. Un gestore che risponde alle
-  /// richieste DNS con una pagina di blocco viene cosi' scavalcato: la
-  /// connessione non passa piu' dal suo resolver.
-  static HttpClient _buildBypassClient() {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15)
-      ..idleTimeout = const Duration(seconds: 15);
+  /// La logica vive in [DohBypassHttpClient], condivisa con la fonte di
+  /// riserva. Qui si aggiungono solo gli indirizzi Cloudflare noti di
+  /// AnimeUnity, da tentare quando nemmeno il DoH risponde.
+  static HttpClient get _bypassHttp => _bypassHttpClient ??=
+      DohBypassHttpClient.build(
+        fallbackIps: (host) =>
+            host.contains('animeunity') ? _cloudflareFallbacks : const [],
+      );
 
-    client.connectionFactory = (uri, proxyHost, proxyPort) async {
-      final host = uri.host;
-      final port = uri.port;
-      final isAnimeUnity = host.contains('animeunity');
-
-      final resolved = await _dohLookup(host);
-
-      // Ordine dei tentativi: gli indirizzi veri appena risolti; se il DoH non
-      // ha risposto, il nome (il DNS di sistema, come sempre); per il sito, in
-      // ultima istanza, indirizzi Cloudflare noti. Cloudflare serve lo stesso
-      // sito da qualunque suo IP, basta l'SNI giusto nel handshake.
-      final targets = <Object>[
-        if (resolved.isNotEmpty) ...resolved,
-        if (resolved.isEmpty) host,
-        if (isAnimeUnity) ..._cloudflareFallbacks,
-      ];
-
-      Object? lastError;
-      for (final target in targets) {
-        try {
-          final task = await Socket.startConnect(target, port);
-          if (uri.scheme != 'https') return task;
-
-          final raw = await task.socket;
-          // `host` (non l'IP) e' l'SNI: il certificato resta valido e il
-          // server sa quale sito si sta chiedendo.
-          final secure = await SecureSocket.secure(raw, host: host);
-          return ConnectionTask.fromSocket(
-            Future<SecureSocket>.value(secure),
-            task.cancel,
-          );
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      throw lastError ??
-          const SocketException('Nessun indirizzo raggiungibile.');
-    };
-
-    return client;
-  }
-
-  /// Gli indirizzi IPv4 di [host], chiesti a un resolver DNS-over-HTTPS.
-  ///
-  /// Si usano indirizzi letterali (`1.1.1.1`, `8.8.8.8`) e non i nomi dei
-  /// resolver: se il gestore intercetta il DNS, anche il nome del resolver
-  /// verrebbe falsato, mentre il suo indirizzo no. Il risultato resta in cache
-  /// per il processo: un host si risolve una volta sola.
-  static Future<List<String>> _dohLookup(String host) async {
-    final cached = _dohCache[host];
-    if (cached != null) return cached;
-
-    const endpoints = [
-      'https://1.1.1.1/dns-query',
-      // Secondo resolver Cloudflare: se il gestore blocca il primo indirizzo
-      // (ma non il secondo) la risoluzione passa comunque.
-      'https://1.0.0.1/dns-query',
-      'https://8.8.8.8/resolve',
-    ];
-    for (final endpoint in endpoints) {
-      try {
-        final uri = Uri.parse(endpoint)
-            .replace(queryParameters: {'name': host, 'type': 'A'});
-        final request = await _dohHttp.getUrl(uri);
-        request.headers.set('accept', 'application/dns-json');
-        final response =
-            await request.close().timeout(const Duration(seconds: 5));
-        final body = await response.transform(utf8.decoder).join();
-        final decoded = jsonDecode(body);
-        final answers = decoded is Map ? decoded['Answer'] : null;
-        if (answers is! List) continue;
-
-        final addresses = <String>[];
-        for (final answer in answers) {
-          if (answer is Map && answer['type'] == 1 && answer['data'] is String) {
-            addresses.add(answer['data'] as String);
-          }
-        }
-        if (addresses.isNotEmpty) {
-          _dohCache[host] = addresses;
-          return addresses;
-        }
-      } catch (_) {
-        // Resolver irraggiungibile o risposta illeggibile: si prova il
-        // successivo, e se nessuno risponde si torna alla risoluzione normale.
-      }
-    }
-    return const [];
-  }
+  /// Lo stesso trasporto, con la risoluzione dei nomi fatta via DoH.
+  static final _Transport _bypass = _IoTransport(() => _bypassHttp);
 
   // -------------------------------------------------------------------------
   // Parsing
@@ -730,12 +671,12 @@ class AnimeUnityExtractor implements ClientSourceExtractor, ClientEpisodeCounts 
   }
 
   Future<(String, DateTime?)> _pickRendition(
-    HttpClient client,
+    _Transport transport,
     String playlistUrl,
     String quality,
   ) async {
     final response = await _send(
-      client,
+      transport,
       'GET',
       Uri.parse(playlistUrl),
       headers: {'user-agent': _userAgent, 'referer': '$_base/'},
@@ -829,10 +770,105 @@ class _Session {
   final String token;
 }
 
+/// Chi sa fare una richiesta HTTP per conto dell'estrattore.
+///
+/// E' un'interfaccia perche' le strade sono piu' d'una — `dart:io`, il motore
+/// di rete di Chromium, il Worker — e l'estrazione deve poterle provare senza
+/// sapere come sono fatte.
+abstract interface class _Transport {
+  /// La chiave della sessione: due trasporti diversi non condividono i cookie.
+  String get sessionKey;
+
+  /// Se i cookie li tiene il trasporto stesso.
+  ///
+  /// Il motore di Chromium ha un suo deposito di cookie e li rimanda da solo,
+  /// come un browser: un header `cookie` scritto a mano lo sostituirebbe con
+  /// una versione parziale.
+  bool get managesCookies;
+
+  Future<_HttpResult> send(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+  );
+}
+
+/// Il trasporto diretto: `dart:io`.
+///
+/// Riceve una funzione e non il client gia' fatto: quello con il DNS-over-HTTPS
+/// va costruito solo se serve davvero, e questo trasporto viene elencato fra i
+/// tentativi a ogni estrazione.
+class _IoTransport implements _Transport {
+  const _IoTransport(this._provide);
+
+  final HttpClient Function() _provide;
+
+  @override
+  String get sessionKey => 'io';
+
+  @override
+  bool get managesCookies => false;
+
+  @override
+  Future<_HttpResult> send(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+  ) async {
+    final request = await _provide().openUrl(method, uri);
+    headers.forEach(request.headers.set);
+    final response = await request.close().timeout(const Duration(seconds: 20));
+    final body = await response.transform(utf8.decoder).join();
+
+    final setCookies = <String>[];
+    final all = <String, String>{};
+    response.headers.forEach((name, values) {
+      final key = name.toLowerCase();
+      all[key] = values.join(', ');
+      if (key == 'set-cookie') setCookies.addAll(values);
+    });
+
+    return _HttpResult(response.statusCode, body, setCookies, all);
+  }
+}
+
+/// Il trasporto che passa dal motore di rete di Chromium (Cronet).
+///
+/// E' lo stack del browser dentro l'app: l'unico che supera un filtro che legge
+/// il nome del sito nell'handshake TLS.
+class _ChromiumTransport implements _Transport {
+  const _ChromiumTransport();
+
+  @override
+  String get sessionKey => 'chromium';
+
+  @override
+  bool get managesCookies => true;
+
+  @override
+  Future<_HttpResult> send(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+  ) async {
+    final response = await ChromiumHttp.send(method, uri, headers);
+    final rawCookie = response.setCookie;
+    return _HttpResult(
+      response.statusCode,
+      response.body,
+      [if (rawCookie != null && rawCookie.isNotEmpty) rawCookie],
+      {'set-cookie': rawCookie ?? ''},
+    );
+  }
+}
+
 class _HttpResult {
-  const _HttpResult(this.status, this.body, this.setCookies);
+  _HttpResult(this.status, this.body, this.setCookies, this.headers);
 
   final int status;
   final String body;
   final List<String> setCookies;
+
+  /// Tutti gli header della risposta, con i nomi in minuscolo.
+  final Map<String, String> headers;
 }

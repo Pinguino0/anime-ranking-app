@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import '../domain/episode.dart';
 import 'animeunity_extractor.dart';
+import 'chromium_http.dart';
+import 'doh_bypass.dart';
 
 /// Chi sa riprodurre un episodio su una fonte di riserva.
 ///
@@ -48,12 +50,62 @@ abstract interface class BackupHttpClient {
   Future<BackupHttpResponse> get(String url, {Map<String, String>? headers});
 }
 
+/// Il client che passa dal motore di rete di Chromium (Cronet).
+///
+/// E' lo stesso stack del browser: sulle reti mobili che filtrano il nome del
+/// sito nell'handshake TLS e' l'unico che passa.
+class ChromiumBackupHttpClient implements BackupHttpClient {
+  const ChromiumBackupHttpClient();
+
+  @override
+  Future<BackupHttpResponse> get(String url, {Map<String, String>? headers}) async {
+    final response = await ChromiumHttp.send(
+      'GET',
+      Uri.parse(url),
+      {
+        'Accept-Language': 'it-IT,it;q=0.9,en;q=0.8',
+        ...?headers,
+      },
+    );
+    return BackupHttpResponse(response.statusCode, response.body);
+  }
+}
+
+/// Prova il motore di Chromium e, se non c'e' o non riesce, la rete diretta.
+class ChromiumThenIoBackupHttpClient implements BackupHttpClient {
+  ChromiumThenIoBackupHttpClient(this._io);
+
+  final BackupHttpClient _io;
+
+  @override
+  Future<BackupHttpResponse> get(String url, {Map<String, String>? headers}) async {
+    if (ChromiumHttp.supported && !ChromiumHttp.unavailable) {
+      try {
+        return await const ChromiumBackupHttpClient().get(url, headers: headers);
+      } catch (_) {
+        // Il motore non e' disponibile o non ha raggiunto il sito: si ripiega
+        // sulla rete diretta, che sulle reti normali va benissimo.
+      }
+    }
+    return _io.get(url, headers: headers);
+  }
+}
+
 /// L'implementazione vera, con `dart:io` e senza pacchetti HTTP aggiuntivi.
 class IoBackupHttpClient implements BackupHttpClient {
   IoBackupHttpClient();
 
-  static final HttpClient _client = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 15);
+  /// Il client con il bypass DoH.
+  ///
+  /// Serve anche qui, non solo per AnimeUnity: sulla rete mobile di alcuni
+  /// gestori il DNS di sistema e' avvelenato, e senza la risoluzione DoH il
+  /// sito di riserva non si apre nemmeno (fallisce l'handshake TLS verso il
+  /// server di blocco). Il browser non ha il problema perche' usa il DoH.
+  static final HttpClient _client = DohBypassHttpClient.build(
+    fallbackIps: (host) => host.contains('animesaturn')
+        ? AnimeSaturnExtractor.cloudflareFallbacks
+        : const [],
+  );
 
   @override
   Future<BackupHttpResponse> get(String url, {Map<String, String>? headers}) async {
@@ -120,7 +172,7 @@ class SaturnCandidate {
 ///      si decodifica e si ha il link riproducibile.
 class AnimeSaturnExtractor implements BackupSourceExtractor {
   AnimeSaturnExtractor({BackupHttpClient? http})
-      : _http = http ?? IoBackupHttpClient();
+      : _http = http ?? ChromiumThenIoBackupHttpClient(IoBackupHttpClient());
 
   final BackupHttpClient _http;
 
@@ -136,6 +188,14 @@ class AnimeSaturnExtractor implements BackupSourceExtractor {
 
   /// Il CDN che ospita il player e la playlist.
   static const String playBase = 'https://play.saturncdn.net';
+
+  /// Indirizzi Cloudflare noti che servono il sito, da tentare quando nemmeno
+  /// il DoH risponde. Cloudflare risponde dallo stesso indirizzo a qualunque
+  /// nome, basta l'SNI giusto nell'handshake.
+  static const List<String> cloudflareFallbacks = [
+    '188.114.96.7',
+    '188.114.97.7',
+  ];
 
   static const String userAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
