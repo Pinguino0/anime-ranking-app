@@ -31,6 +31,8 @@ class HeroBanner extends StatelessWidget {
     this.eyebrow,
     this.meta,
     this.trailing,
+    this.primaryLabel = 'Guarda',
+    this.primaryIcon = Icons.play_arrow_rounded,
   });
 
   final String title;
@@ -50,6 +52,16 @@ class HeroBanner extends StatelessWidget {
 
   /// Azione secondaria a destra delle due principali.
   final Widget? trailing;
+
+  /// Testo del pulsante principale.
+  ///
+  /// Parametrizzato perche' la home non manda in riproduzione dalla prima
+  /// schermata: senza un episodio scelto, "Guarda" prometterebbe una cosa che
+  /// non puo' mantenere, mentre "Dettagli" apre esattamente cio' che si vede.
+  final String primaryLabel;
+
+  /// Icona del pulsante principale.
+  final IconData primaryIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -101,6 +113,8 @@ class HeroBanner extends StatelessWidget {
                       meta: meta,
                       onTap: onTap,
                       trailing: trailing,
+                      primaryLabel: primaryLabel,
+                      primaryIcon: primaryIcon,
                     ),
                   ),
                 ),
@@ -148,6 +162,8 @@ class _Text extends StatelessWidget {
     this.subtitle,
     this.meta,
     this.trailing,
+    this.primaryLabel = 'Guarda',
+    this.primaryIcon = Icons.play_arrow_rounded,
   });
 
   final String? eyebrow;
@@ -156,6 +172,8 @@ class _Text extends StatelessWidget {
   final String? meta;
   final VoidCallback? onTap;
   final Widget? trailing;
+  final String primaryLabel;
+  final IconData primaryIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -218,17 +236,20 @@ class _Text extends StatelessWidget {
           ),
         ],
         const SizedBox(height: ArSpace.lg),
-        Row(
+        // `Wrap` e non `Row`: su un telefono stretto due pulsanti affiancati
+        // non ci stanno e il secondo finirebbe fuori dallo schermo. Con il wrap
+        // vanno a capo, che e' quello che serve, senza stringere il testo.
+        Wrap(
+          spacing: ArSpace.sm,
+          runSpacing: ArSpace.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             ArGradientButton(
-              label: 'Guarda',
-              icon: Icons.play_arrow_rounded,
+              label: primaryLabel,
+              icon: primaryIcon,
               onPressed: onTap,
             ),
-            if (trailing != null) ...[
-              const SizedBox(width: ArSpace.sm),
-              trailing!,
-            ],
+            ?trailing,
           ],
         ),
       ],

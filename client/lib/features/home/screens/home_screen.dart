@@ -2,403 +2,558 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/constants/breakpoints.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/anime_card.dart';
-import '../../../core/ui/content_row.dart';
-import '../../../core/ui/hero_banner.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../core/ui/transitions.dart';
 import '../../anime/domain/anime.dart';
-import '../../auth/presentation/auth_controller.dart';
 import '../../history/domain/watch_history.dart';
 import '../../history/presentation/history_controller.dart';
 import '../../history/presentation/widgets/continue_watching_card.dart';
+import '../../novita/novita_controller.dart';
+import '../../ranking/domain/ranking.dart';
+import '../../ranking/presentation/ranking_controller.dart';
+import '../../watchlist/domain/watchlist.dart';
+import '../../watchlist/presentation/watchlist_controller.dart';
+import '../domain/friend_activity.dart';
 import '../home_controller.dart';
+import '../widgets/home_header.dart';
+import '../widgets/home_hero.dart';
+import '../widgets/home_sections.dart';
 
-/// Home dell'app: banner in evidenza, righe da sfogliare, catalogo.
+/// Home di AnimeRank.
 ///
-/// La struttura e' quella dei servizi di streaming per una ragione precisa: la
-/// prima domanda di chi apre un'app di anime non e' "voglio filtrare per
-/// genere", e' "cosa c'e' da guardare stasera". Un elenco verticale di righe di
-/// tabella risponde alla seconda domanda.
-///
-/// Il banner viene prima di tutto perche' risponde a quella domanda in modo
-/// istantaneo: l'utente non deve nemmeno iniziare a scorrere per vedere il
-/// titolo consigliato.
-///
-/// La sezione per gruppo resta sotto tutto e non e' un carosello: scegliere un
-/// gruppo e' una decisione, non un contenuto da sfogliare.
+/// Le sezioni sono nell'ordine in cui si affrontano le domande di chi apre
+/// l'app: "cosa stavo guardando", "cosa ho visto", "cosa c'e' di nuovo", "cosa
+/// guardano gli altri", "cosa potrei guardare". Ognuna e' un widget a se' che
+/// osserva i propri provider: un caricamento lento del feed social non ricostruisce
+/// il catalogo, e un suo errore non spegne il resto della pagina.
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final feed = ref.watch(homeFeedProvider);
-    final continueWatching = ref.watch(continueWatchingProvider);
-    final email = ref.watch(authStatusProvider).user?.email;
-    final page = ArSpace.page(context);
-
     return Scaffold(
       body: RefreshIndicator(
-        // La ricarica esplicita e' l'unico modo di aggiornare la home: si
-        // ricarica quando lo si chiede, non a ogni visita, altrimenti tornare
-        // dal profilo rifarebbe la stessa richiesta. Anche "Continua da
-        // guardare" si rilegge qui: dopo aver guardato qualcosa il punto e'
-        // cambiato, e tirare la home e' il gesto che l'utente si aspetta che lo
-        // aggiorni.
-        onRefresh: () async {
-          ref.invalidate(continueWatchingProvider);
-          await ref.read(homeFeedProvider.notifier).refresh();
-        },
-        child: CustomScrollView(
+        // La home si aggiorna quando lo si chiede, non a ogni ritorno da
+        // un'altra schermata: altrimenti uscire da una scheda e rientrare
+        // rifarebbe le stesse richieste. Il gesto di tirare e' quello che
+        // l'utente si aspetta aggiorni i numeri.
+        onRefresh: () => _refresh(ref),
+        child: const CustomScrollView(
           slivers: [
-            _TopBar(email: email, padding: page),
-            ...feed.when(
-              // Errore e caricamento hanno la stessa struttura: una schermata
-              // vuota durante il caricamento e' indistinguibile da una home
-              // rotta, e lo scheletro dice subito "sta arrivando".
-              loading: () => const [
-                SliverToBoxAdapter(child: _HeroSkeleton()),
-                SliverToBoxAdapter(child: RowsSkeleton()),
-              ],
-              error: (error, _) => [
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: EmptyState(
-                    icon: Icons.cloud_off,
-                    title: 'Home non disponibile',
-                    message: 'Non si e\' riusciti a caricare i titoli. '
-                        'Tira verso il basso per riprovare.',
-                    action: FilledButton.icon(
-                      onPressed: () =>
-                          ref.read(homeFeedProvider.notifier).refresh(),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Riprova'),
-                    ),
-                  ),
-                ),
-              ],
-              data: (data) => _content(
-                context,
-                ref,
-                data,
-                continueWatching.asData?.value ?? const [],
-              ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
+            HomeHeader(),
+            SliverToBoxAdapter(child: HomeHero()),
+            SliverToBoxAdapter(child: _ContinueSection()),
+            SliverToBoxAdapter(child: _RecentSection()),
+            SliverToBoxAdapter(child: _LatestSection()),
+            SliverToBoxAdapter(child: _PopularSection()),
+            SliverToBoxAdapter(child: _CommunitySection()),
+            SliverToBoxAdapter(child: _WatchlistSection()),
+            SliverToBoxAdapter(child: _RecommendedSection()),
+            SliverToBoxAdapter(child: _SeasonSection()),
+            SliverToBoxAdapter(child: _FriendsSection()),
+            SliverToBoxAdapter(child: _RandomSection()),
+            SliverToBoxAdapter(child: SizedBox(height: ArSpace.xl)),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _content(
-    BuildContext context,
-    WidgetRef ref,
-    HomeFeed feed,
-    List<ContinueWatchingItem> continueWatching,
-  ) {
-    final usable = feed.rows
-        .where((row) => row.entries.length >= _minRow)
-        .toList();
+  /// Rilegge tutte le fonti della home.
+  ///
+  /// Si invalidano i provider e non si aspetta ciascuno: le sezioni mostrano da
+  /// sole il proprio stato, e bloccare l'indicatore su dodici richieste lo
+  /// farebbe girare a lungo senza motivo. Si aspettano le due del banner, che
+  /// sono quelle la cui assenza si nota di piu'.
+  Future<void> _refresh(WidgetRef ref) async {
+    ref.invalidate(continueWatchingProvider);
+    ref.invalidate(watchHistoryProvider);
+    ref.invalidate(upcomingAnimeProvider);
+    ref.invalidate(recentEpisodesProvider);
+    ref.invalidate(popularAnimeProvider);
+    ref.invalidate(featuredAnimeProvider);
+    ref.invalidate(friendActivityProvider);
+    ref.invalidate(recommendedAnimeProvider);
+    ref.invalidate(myListProvider);
+    ref.invalidate(randomAnimeProvider);
 
-    // Catalogo ancora vuoto: non e' un errore, e' una base da popolare. Il
-    // testo lo dice, invece di lasciare una pagina nera che sembra rotta.
-    //
-    // Anche "Continua da guardare" tiene in piedi la pagina: chi ha lasciato un
-    // episodio a meta' ha qualcosa da fare anche se la griglia del catalogo non
-    // e' ancora arrivata.
-    if (usable.isEmpty && feed.feature == null && continueWatching.isEmpty) {
-      return const [
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: EmptyState(
-            icon: Icons.inventory_2_outlined,
-            title: 'Catalogo ancora vuoto',
-            message: 'Non c\'e\' ancora nessun anime salvato. '
-                'Apri la ricerca e fai partire una ricerca online: '
-                'quello che trovi viene salvato qui e resta disponibile offline.',
-          ),
-        ),
-      ];
+    final group = ref.read(primaryGroupProvider).asData?.value;
+    if (group != null) {
+      ref.invalidate(
+        specialRankingProvider((group.id, SpecialRankingKind.top)),
+      );
+      ref.invalidate(rankingProvider(group.id));
     }
 
-    return [
-      if (feed.feature != null)
-        SliverToBoxAdapter(
-          child: _Banner(entry: feed.feature!),
-        ),
-
-      // Prima delle righe del catalogo: riprendere quello che si stava guardando
-      // e' la prima cosa che si vuole fare aprendo l'app, non una scoperta da
-      // fare scorrendo.
-      if (continueWatching.isNotEmpty)
-        SliverToBoxAdapter(child: _continueRow(ref, continueWatching)),
-
-      for (final row in usable)
-        SliverToBoxAdapter(child: _row(row)),
-
-      if (feed.catalog.isNotEmpty)
-        SliverToBoxAdapter(child: _catalog(context, feed.catalog)),
-    ];
-  }
-
-  /// Riga "Continua da guardare".
-  ///
-  /// Il tocco riprende l'episodio, non apre la scheda: e' quello che si vuole
-  /// fare quando si tocca una card di riprendi, e la scheda si raggiunge lo
-  /// stesso dal titolo nella schermata dell'episodio.
-  Widget _continueRow(WidgetRef ref, List<ContinueWatchingItem> items) {
-    return ContentRow(
-      title: 'Continua da guardare',
-      subtitle: 'Riprendi dall\'episodio dove eri rimasto',
-      itemCount: items.length,
-      itemBuilder: (context, i) {
-        final item = items[i];
-        return ContinueWatchingCard(
-          item: item,
-          // `push` completa quando la rotta si chiude: al ritorno l'episodio e'
-          // avanzato, e la riga va riletta invece di restare ferma al punto di
-          // quando e' partita. Non si puo' fare dall'uscita del player perche'
-          // in `dispose` il ref non e' piu' utilizzabile.
-          onTap: () async {
-            await context.push(
-              AppRoutes.episode(item.animeId, item.episodeId),
-              extra: item.animeTitle,
-            );
-            ref.invalidate(continueWatchingProvider);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _row(HomeRow row) {
-    return ContentRow(
-      title: row.title,
-      subtitle: row.subtitle,
-      itemCount: row.entries.length,
-      itemBuilder: (context, i) => _card(context, row.entries[i], hero: false),
-    );
-  }
-
-  /// Griglia dell'intero catalogo.
-  ///
-  /// Va in fondo e non in cima perche' risponde a una domanda diversa da
-  /// quella delle righe: le righe dicono "cosa guardo", questa dice "cosa c'e'
-  ///". Metterla in testa costringerebbe a scorrerla tutta per arrivare alle
-  /// righe.
-  Widget _catalog(BuildContext context, List<AnimeEntry> entries) {
-    final spacing = ArSpace.sm;
-    final padding = EdgeInsets.symmetric(horizontal: ArSpace.page(context).left);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: ArSpace.xs),
-        SectionHeader(
-          title: 'Tutti gli anime',
-          subtitle: '${entries.length} titoli in catalogo',
-          action: () => context.push(AppRoutes.animeSearch),
-          actionLabel: 'Cerca',
-        ),
-        const SizedBox(height: ArSpace.sm),
-        // Le colonne si contano sulla larghezza davvero disponibile e non su un
-        // numero fisso per schermata: su un monitor largo un `crossAxisCount`
-        // calato a mano lascia celle enormi, e la locandina 2:3 si riduce a
-        //ritratto stretto al centro di un guscio vuoto. Qui la cella resta
-        // entro [minCell, maxCell] e l'altezza segue la cella, quindi la griglia
-        // riempie la larghezza senza buchi.
-        LayoutBuilder(
-          builder: (context, constraints) {
-            const minCell = 132.0;
-            const maxCell = 176.0;
-
-            final width = constraints.maxWidth - padding.horizontal;
-            // Due limiti, non uno: `maxCell` decide quante colonne ci stanno
-            // senza che la cella si allarghi troppo, `minCell` impedisce che su
-            // uno schermo enormouse le colonne diventino cosi' tante da rendere
-            // la locandina illeggibile. Il secondo e' il tetto.
-            final fit = (width / maxCell).ceil();
-            final readable = (width / minCell).floor().clamp(2, 12);
-            final columns = fit.clamp(2, readable);
-            final cell =
-                (width - spacing * (columns - 1)) / columns;
-
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: padding,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                // La card e' solo la locandina 2:3, quindi l'altezza della
-                // cella non e' un numero inventato: e' la cella per 3/2.
-                mainAxisExtent: cell * 3 / 2,
-                crossAxisSpacing: spacing,
-                mainAxisSpacing: spacing,
-              ),
-              itemCount: entries.length,
-              itemBuilder: (context, i) => _card(context, entries[i], hero: true),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _card(BuildContext context, AnimeEntry entry, {required bool hero}) {
-    return AnimeCard(
-      title: entry.displayTitle,
-      imageUrl: entry.imageUrl,
-      score: entry.score,
-      // Solo la griglia catalogo mette l'Hero. Lo stesso anime puo' comparire
-      // in piu' righe in alto (per esempio "in corso" e "piu' votati"): due
-      // Hero con lo stesso tag nella stessa rotta fanno fallire l'animazione
-      // con "multiple heroes that share the same tag" e portano via la
-      // schermata intera. Un Hero per anime e' il limite, non uno per sezione.
-      heroTag: hero ? entry.heroTag : null,
-      subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
-      genres: entry.genres,
-      // Toccando un poster si apre la scheda dell'opera, non la ricerca con il
-      // titolo come testo: riaprire la ricerca scopriva di nuovo gli stessi
-      // risultati quando l'utente voleva solo guardare i dettagli di quello che
-      // aveva sotto gli occhi.
-      onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
-    );
+    try {
+      await ref.read(featuredAnimeProvider.future);
+      await ref.read(popularAnimeProvider.future);
+    } on Exception {
+      // Un guasto a questo livello non deve far fallire il gesto: la sezione
+      // interessata mostrera' il proprio messaggio, e le altre restano in
+      // piedi.
+    }
   }
 }
 
-/// Sotto i tre titoli una riga e' solo rumore.
-///
-/// Con due locandine la sezione sembra un caricamento fallito: l'utente prova
-/// a scorrere e non succede nulla. Meglio non mostrarla.
-const int _minRow = 3;
-
-/// Barra in alto con il nome dell'utente.
-///
-/// Il nome del servizio da solo occuperebbe una riga intera senza dire nulla,
-/// mentre il nome di chi e' collegato e' l'informazione che rende la pagina
-/// personale. Il segno dell'app e' la parte che resta nel gradiente: da solo
-/// sarebbe una riga di testo che compete con il nome per la stessa importanza.
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.email, required this.padding});
-
-  final String? email;
-  final EdgeInsets padding;
+/// 3. Continua a guardare.
+class _ContinueSection extends ConsumerWidget {
+  const _ContinueSection();
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return SliverAppBar(
-      pinned: true,
-      floating: true,
-      toolbarHeight: 62,
-      backgroundColor: ArColors.bg,
-      titleSpacing: padding.left,
-      title: Row(
-        children: [
-          if (email != null) ...[
-            Flexible(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ciao, ${email!.split('@').first}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  Text(
-                    'Cosa guardi stasera',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ] else
-            Text('AnimeRank', style: theme.textTheme.titleLarge),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Cerca',
-            icon: const Icon(Icons.search),
-            onPressed: () => context.push(AppRoutes.animeSearch),
-          ),
-        ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    return HomeSection<ContinueWatchingItem>(
+      title: 'Continua a guardare',
+      subtitle: 'Riprendi esattamente da dove eri rimasto',
+      value: ref.watch(continueWatchingProvider),
+      onRetry: () => ref.invalidate(continueWatchingProvider),
+      // Il tocco riprende l'episodio invece di aprire la scheda: e' l'azione
+      // che l'utente stava per fare, e la scheda resta a un tocco dalla lista.
+      itemBuilder: (context, item) => ContinueWatchingCard(
+        item: item,
+        onTap: () async {
+          await context.push(
+            AppRoutes.episode(item.animeId, item.episodeId),
+            extra: item.animeTitle,
+          );
+          // Guardato qualcosa, il punto di ripresa e' cambiato: si rileggono
+          // solo le due righe che ne dipendono.
+          if (context.mounted) {
+            ref.invalidate(continueWatchingProvider);
+            ref.invalidate(watchHistoryProvider);
+          }
+        },
       ),
     );
   }
 }
 
-/// Banner con l'opera in evidenza.
-class _Banner extends StatelessWidget {
-  const _Banner({required this.entry});
-
-  final AnimeEntry entry;
+/// 4. Guardati di recente.
+class _RecentSection extends ConsumerWidget {
+  const _RecentSection();
 
   @override
-  Widget build(BuildContext context) {
-    final facts = [
-      if (entry.mediaType != null) entry.mediaType!.label,
-      if (entry.episodes != null) '${entry.episodes} episodi',
-      if (entry.year != null) '${entry.year}',
-    ].join(' · ');
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(watchHistoryProvider);
+    final inProgress = {
+      for (final item
+          in ref.watch(continueWatchingProvider).asData?.value ??
+              const <ContinueWatchingItem>[])
+        item.animeId,
+    };
 
-    return ArReveal(
-      // Nessun ritardo: e' il primo elemento dello schermo e deve comparire
-      // subito. Un banner che arriva dopo mezzo secondo sembra un caricamento.
-      child: HeroBanner(
+    return HomeSection<WatchHistoryItem>(
+      title: 'Guardati di recente',
+      subtitle: 'Un anime per riga: gli episodi aperti o completati',
+      onSeeAll: () => context.push(AppRoutes.watchHistory),
+      value: history.whenData(
+        (rows) => recentlyWatched(rows, excludeAnimeIds: inProgress),
+      ),
+      onRetry: () => ref.read(watchHistoryProvider.notifier).refresh(),
+      itemBuilder: (context, item) => HomePosterCard(
+        title: item.animeTitle,
+        imageUrl: item.imageUrl,
+        subtitle: _recentSubtitle(item),
+        badge: HomeBadge(
+          label: item.completed ? 'Visto' : 'Aperto',
+          color: item.completed ? ArColors.completed : ArColors.watching,
+          icon: item.completed ? Icons.check_rounded : Icons.play_arrow_rounded,
+        ),
+        onTap: () => context.push(
+          AppRoutes.episode(item.animeId, item.episodeId),
+          extra: item.animeTitle,
+        ),
+      ),
+    );
+  }
+
+  /// "Episodio 7 · 2 g": il numero dice cosa, la data dice quanto e' recente.
+  static String _recentSubtitle(WatchHistoryItem item) {
+    final at = item.updatedAt;
+    if (at == null) return item.episodeLabel;
+    return '${item.episodeLabel} · ${relativeDate(at)}';
+  }
+}
+
+/// 5. Ultime novita'.
+class _LatestSection extends ConsumerWidget {
+  const _LatestSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return HomeSection<AnimeEntry>(
+      title: 'Ultime novità',
+      subtitle: 'Le puntate entrate per ultime nel catalogo',
+      onSeeAll: () => context.push(AppRoutes.novita),
+      value: ref.watch(recentEpisodesProvider),
+      onRetry: () => ref.invalidate(recentEpisodesProvider),
+      itemBuilder: (context, entry) => AnimeCard(
         title: entry.displayTitle,
         imageUrl: entry.imageUrl,
-        eyebrow: 'In evidenza',
-        meta: facts.isEmpty ? null : facts,
-        // La trama si taglia a due righe: il banner ha altezza fissa e una
-        // sinossi lunga spingerebbe le azioni fuori dal riquadro.
-        subtitle: _shorten(entry.synopsis),
+        score: entry.score,
+        subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
+        genres: entry.genres,
+        badge: entry.status == null
+            ? null
+            : HomeBadge(
+                label: entry.status!.label,
+                color: airStatusColor(entry.status!),
+              ),
         onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
       ),
     );
   }
-
-  /// Prima frase, limitata.
-  ///
-  /// Non un troncamento con i puntini: la sinossi del catalogo esterno spesso
-  /// finisce a meta' frase e il "..." su un periodo interrotto fa pensare a un
-  /// testo corrotto. Meglio chiudere sull'ultimo punto fermo trovato.
-  String? _shorten(String? text) {
-    if (text == null || text.trim().isEmpty) return null;
-
-    const limit = 220;
-    final clean = text.trim();
-    if (clean.length <= limit) return clean;
-
-    final cut = clean.substring(0, limit);
-    final stop = cut.lastIndexOf(RegExp(r'[.!?]'));
-    return stop > limit ~/ 2 ? cut.substring(0, stop + 1) : '$cut...';
-  }
 }
 
-/// Scheletro del banner.
-///
-/// La stessa altezza del banner vero: uno scheletro piu' basso farebbe salire
-/// tutto il resto della pagina e poi tornare indietro al primo arrivo dei dati.
-class _HeroSkeleton extends StatelessWidget {
-  const _HeroSkeleton();
+/// 6. Piu' popolari.
+class _PopularSection extends ConsumerWidget {
+  const _PopularSection();
 
   @override
-  Widget build(BuildContext context) {
-    // Stessa altezza a piena larghezza del banner vero (380 su desktop, 300
-    // altrove). Il banner non ha padding ne' angoli smussati, quindi nemmeno lo
-    // scheletro ne ha: con un riquadro rientrato, al primo arrivo dei dati la
-    // pagina si assestava di colpo.
-    final isDesktop = Breakpoints.fromContext(context).isExpanded;
-    return SkeletonBox(
-      height: isDesktop ? 380 : 300,
-      radius: 0,
+  Widget build(BuildContext context, WidgetRef ref) {
+    return HomeSection<AnimeEntry>(
+      title: 'Più popolari',
+      subtitle: 'Quante persone li hanno in lista, non quanto valgono',
+      value: ref.watch(popularAnimeProvider),
+      onRetry: () => ref.invalidate(popularAnimeProvider),
+      itemBuilder: (context, entry) => AnimeCard(
+        title: entry.displayTitle,
+        imageUrl: entry.imageUrl,
+        // Nessun voto: il dato che ordina questa riga e' la popolarita', e la
+        // stella mostrerebbe il voto esterno, che e' un'altra classifica.
+        score: null,
+        subtitle: entry.popularity == null
+            ? null
+            : '${compactNumber(entry.popularity!)} in lista',
+        genres: entry.genres,
+        onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
+      ),
     );
   }
 }
 
+/// 7. Piu' votati dalla community.
+class _CommunitySection extends ConsumerWidget {
+  const _CommunitySection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final group = ref.watch(primaryGroupProvider).asData?.value;
+
+    return HomeSection<SpecialRankingEntry>(
+      title: 'Più votati dalla community',
+      subtitle: group == null ? null : 'La media dei voti di ${group.name}',
+      onSeeAll: group == null
+          ? null
+          : () => context.push(AppRoutes.ranking(group.id)),
+      value: ref.watch(communityTopProvider),
+      onRetry: group == null
+          ? null
+          : () => ref.invalidate(
+              specialRankingProvider((group.id, SpecialRankingKind.top)),
+            ),
+      itemBuilder: (context, row) => AnimeCard(
+        title: row.displayTitle,
+        imageUrl: row.imageUrl,
+        // La media sta scritta per esteso nel sottotitolo, insieme ai voti:
+        // e' un voto del gruppo, e va detto che lo e'.
+        subtitle:
+            '${row.valueLabel.$2} di media · ${row.secondaryLabel.$2} voti',
+        badge: HomeBadge(
+          label: '#${row.position}',
+          color: ArColors.rank(row.position),
+        ),
+        onTap: () =>
+            context.push(AppRoutes.animeDetail, extra: _entryOfSpecial(row)),
+      ),
+    );
+  }
+}
+
+/// 8. Riprendi dalla Watchlist.
+class _WatchlistSection extends ConsumerWidget {
+  const _WatchlistSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return HomeSection<WatchlistEntry>(
+      title: 'Riprendi dalla Watchlist',
+      subtitle: 'Da vedere e in visione, senza i titoli finiti o lasciati',
+      onSeeAll: () => context.push(AppRoutes.myList),
+      value: ref.watch(myListProvider).whenData(watchlistResume),
+      onRetry: () => ref.read(myListProvider.notifier).refresh(),
+      itemBuilder: (context, entry) => HomePosterCard(
+        title: entry.displayTitle,
+        imageUrl: entry.imageUrl,
+        subtitle: entry.hasStarted
+            ? 'Episodio ${entry.episodeLabel}'
+            : entry.status.label,
+        badge: HomeBadge(
+          label: entry.status.label,
+          color: watchStatusColor(entry.status),
+        ),
+        // La barra compare solo se il totale degli episodi e' noto: altrove
+        // sarebbe una percentuale inventata.
+        progress: entry.progress,
+        onTap: () =>
+            context.push(AppRoutes.animeDetail, extra: _entryOfWatchlist(entry)),
+      ),
+    );
+  }
+}
+
+/// 9. Consigliati per te.
+class _RecommendedSection extends ConsumerWidget {
+  const _RecommendedSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final genre = ref.watch(recommendationSignalProvider).genre;
+
+    return HomeSection<AnimeEntry>(
+      title: 'Consigliati per te',
+      subtitle: genre == null
+          ? null
+          : 'Altri titoli $genre, come quelli che segui',
+      value: ref.watch(recommendedAnimeProvider),
+      onRetry: () => ref.invalidate(recommendedAnimeProvider),
+      itemBuilder: (context, entry) => AnimeCard(
+        title: entry.displayTitle,
+        imageUrl: entry.imageUrl,
+        score: entry.score,
+        subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
+        genres: entry.genres,
+        onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
+      ),
+    );
+  }
+}
+
+/// 10. Stagione corrente.
+class _SeasonSection extends ConsumerWidget {
+  const _SeasonSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // L'opera in evidenza e' gia' nel banner qui sopra: ripeterla come prima
+    // card della riga sembrerebbe un contenuto duplicato.
+    final featuredId = ref.watch(featuredAnimeProvider).asData?.value?.id;
+
+    return HomeSection<AnimeEntry>(
+      title: 'Stagione corrente',
+      subtitle: currentSeasonLabel(DateTime.now()),
+      value: ref.watch(upcomingAnimeProvider).whenData(
+        (rows) => [
+          for (final entry in rows)
+            if (entry.id != featuredId) entry,
+        ],
+      ),
+      onRetry: () => ref.invalidate(upcomingAnimeProvider),
+      itemBuilder: (context, entry) => AnimeCard(
+        title: entry.displayTitle,
+        imageUrl: entry.imageUrl,
+        score: entry.score,
+        subtitle: entry.factsLabel.isEmpty ? null : entry.factsLabel,
+        genres: entry.genres,
+        badge: entry.status == null
+            ? null
+            : HomeBadge(
+                label: entry.status!.label,
+                color: airStatusColor(entry.status!),
+              ),
+        onTap: () => context.push(AppRoutes.animeDetail, extra: entry),
+      ),
+    );
+  }
+}
+
+/// 11. Attivita' degli amici.
+class _FriendsSection extends ConsumerWidget {
+  const _FriendsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return HomeSection<FriendActivity>(
+      title: 'Attività degli amici',
+      subtitle: 'Gli ultimi voti e salvataggi dei membri dei tuoi gruppi',
+      value: ref.watch(friendActivityProvider),
+      onRetry: () => ref.invalidate(friendActivityProvider),
+      itemBuilder: (context, activity) => FriendActivityCard(
+        activity: activity,
+        onTap: () =>
+            context.push(AppRoutes.animeDetail, extra: activity.anime),
+      ),
+    );
+  }
+}
+
+/// 12. Anime casuale.
+class _RandomSection extends ConsumerWidget {
+  const _RandomSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final entry = ref.watch(randomAnimeProvider);
+    // Catalogo vuoto: nessuna card, e nessuna sezione vuota da riempire.
+    if (entry == null) return const SizedBox.shrink();
+
+    return _RandomCard(
+      entry: entry,
+      onShuffle: () => ref.read(randomAnimeProvider.notifier).shuffle(),
+    );
+  }
+}
+
+/// Card larga dell'anime estratto a caso.
+///
+/// Non una card del carosello: e' l'ultima sezione e invita a fermarsi, quindi
+/// ha spazio per la sinossi e due azioni. La disposizione a riga (locandina a
+/// sinistra, testo a destra) regge anche su schermo stretto, dove impilare
+/// costringerebbe a scorrere per arrivare ai pulsanti.
+class _RandomCard extends StatelessWidget {
+  const _RandomCard({required this.entry, required this.onShuffle});
+
+  final AnimeEntry entry;
+  final VoidCallback onShuffle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final padding = ArSpace.page(context);
+    final genres = entry.genres.take(3).join(' · ');
+    final synopsis = shortSynopsis(entry.synopsis, limit: 260);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          title: 'Anime casuale',
+          subtitle: 'Un titolo estratto dal catalogo',
+          action: onShuffle,
+          actionLabel: 'Un altro',
+        ),
+        const SizedBox(height: ArSpace.sm),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            padding.left,
+            0,
+            padding.right,
+            ArSpace.md,
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(ArSpace.md),
+            decoration: BoxDecoration(
+              color: ArColors.containerLow,
+              borderRadius: BorderRadius.circular(ArRadii.card),
+              border: Border.all(color: ArColors.borderSoft),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 104,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(ArRadii.control),
+                    child: AspectRatio(
+                      aspectRatio: 2 / 3,
+                      child: HomePosterImage(
+                        url: entry.imageUrl,
+                        title: entry.displayTitle,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: ArSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.displayTitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      if (genres.isNotEmpty) ...[
+                        const SizedBox(height: ArSpace.xxs),
+                        Text(
+                          genres,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ArColors.textLow,
+                          ),
+                        ),
+                      ],
+                      if (synopsis != null) ...[
+                        const SizedBox(height: ArSpace.xs),
+                        Text(
+                          synopsis,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ArColors.textMid,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: ArSpace.md),
+                      Wrap(
+                        spacing: ArSpace.sm,
+                        runSpacing: ArSpace.xs,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          ArGradientButton(
+                            label: 'Scopri',
+                            icon: Icons.explore_outlined,
+                            onPressed: () => context.push(
+                              AppRoutes.animeDetail,
+                              extra: entry,
+                            ),
+                          ),
+                          if (entry.id != null)
+                            HomeWatchlistButton(
+                              animeId: entry.id!,
+                              onSurface: true,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Scheda anime ricostruita da una riga di watchlist.
+///
+/// Come `animeEntryOf`, ma con l'`id` interno valorizzato: la scheda lo usa per
+/// il pulsante "Guarda", e senza resterebbe un'opera su cui non si puo' fare
+/// nulla.
+AnimeEntry _entryOfWatchlist(WatchlistEntry entry) => AnimeEntry(
+  id: entry.animeId,
+  externalId: entry.animeId,
+  title: entry.title,
+  italianTitle: entry.italianTitle,
+  imageUrl: entry.imageUrl,
+  episodes: entry.episodes,
+  year: entry.year,
+  genres: entry.genres,
+  status: entry.airing ? AnimeAirStatus.airing : null,
+);
+
+/// Scheda anime ricostruita da una riga di classifica speciale.
+AnimeEntry _entryOfSpecial(SpecialRankingEntry row) => AnimeEntry(
+  id: row.animeId,
+  externalId: row.animeId,
+  title: row.title,
+  italianTitle: row.italianTitle,
+  imageUrl: row.imageUrl,
+);

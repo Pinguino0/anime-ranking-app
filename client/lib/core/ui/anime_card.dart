@@ -35,6 +35,7 @@ class AnimeCard extends StatefulWidget {
     this.heroTag,
     this.onTap,
     this.trailing,
+    this.badge,
     this.hoverEnabled = true,
   });
 
@@ -74,6 +75,13 @@ class AnimeCard extends StatefulWidget {
 
   /// Elemento in basso a destra: voto del gruppo, badge di stato.
   final Widget? trailing;
+
+  /// Elemento in alto a sinistra: posizione in classifica o stato.
+  ///
+  /// Sta a sinistra e non a destra perche' il voto ha gia' quel posto: due
+  /// pastiglie sullo stesso angolo si coprirebbero, e un titolo che e' sia
+  /// "N. 1" sia "In corso" ha bisogno di entrambe.
+  final Widget? badge;
 
   /// Disattiva l'hover.
   ///
@@ -141,6 +149,9 @@ class _AnimeCardState extends State<AnimeCard> {
               right: 8,
               child: ScoreBadge(score: widget.score!),
             ),
+
+          if (widget.badge != null)
+            Positioned(top: 8, left: 8, child: widget.badge!),
 
           // Il pannello sale di poco e appare dopo: l'insieme racconta
           // "questa card si puo' aprire", mentre la comparsa del solo testo

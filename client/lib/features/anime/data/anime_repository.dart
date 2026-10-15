@@ -41,6 +41,19 @@ abstract interface class AnimeRepository {
   /// scritta in catalogo.
   Future<List<AnimeEntry>> recentEpisodes({int limit});
 
+  /// Gli anime che piu' persone hanno in lista.
+  ///
+  /// La popolarita' e' un campo del catalogo (`anime.popularity`) e dice quante
+  /// persone hanno salvato l'opera, non quanto vale: per questo la riga che la
+  /// usa non mostra una stella. Sarebbe il voto esterno, non quello di
+  /// AnimeRank, e chiamare "popolari" una riga ordinata per voto sarebbe
+  /// scambiare due classifiche diverse.
+  ///
+  /// Legge la tabella direttamente e non passa da `anime_search`: quella RPC a
+  /// query vuota ordina per data di uscita e non espone un ordinamento per
+  /// popolarita', quindi non potrebbe rispondere a questa domanda.
+  Future<List<AnimeEntry>> popular({int limit});
+
   /// Cerca nel catalogo esterno passando dall'Edge Function, con scrittura in
   /// catalogo.
   ///
@@ -140,6 +153,16 @@ class SupabaseAnimeRepository implements AnimeRepository {
   /// risultati per pagina con cui la Edge Function tronca ogni richiesta:
   /// chiedere di piu' non porterebbe nulla.
   static const int pageSize = AppConfig.searchPageSize;
+
+  /// Colonne del catalogo lette da una query diretta sulla tabella.
+  ///
+  /// Sono le stesse che restituisce `anime_search`, senza `similarity` (che
+  /// esiste solo nella ricerca) e senza `in_catalog`, che va aggiunto a mano
+  /// perche' una lettura della tabella e' per definizione in catalogo.
+  static const String _catalogColumns =
+      'id, external_id, title, title_it, japanese_title, synopsis, image_url, '
+      'trailer_url, episodes, status, year, genres, media_type, season, '
+      'aired_from, aired_to, score, scored_by, popularity, duration, studio';
 
   @override
   Future<AnimePage> searchLocal(
@@ -340,6 +363,38 @@ class SupabaseAnimeRepository implements AnimeRepository {
     } catch (_) {
       throw const AnimeFailure(
         'Nuovi episodi non disponibili. Riprova.',
+        isRetryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<List<AnimeEntry>> popular({int limit = 20}) async {
+    try {
+      final rows = await _client
+          .from('anime')
+          .select(_catalogColumns)
+          // `popularity` nullo (o zero) e' un'anime senza dato di liste: non
+          // appartiene a una classifica di popolarita' e resta fuori invece di
+          // finire in fondo per un valore che non ha.
+          .gt('popularity', 0)
+          .order('popularity', ascending: false)
+          .limit(limit);
+
+      return [
+        for (final row in _rows(rows))
+          // La riga viene dalla tabella, quindi l'opera e' in catalogo per
+          // definizione: senza questo flag `canRate` sarebbe falso e la scheda
+          // non lascerebbe votarla.
+          AnimeEntry.parse({..._map(row), 'in_catalog': true}),
+      ];
+    } on PostgrestException catch (e) {
+      throw _translate(e);
+    } on AppFailure {
+      rethrow;
+    } catch (_) {
+      throw const AnimeFailure(
+        'I più popolari non sono disponibili. Riprova.',
         isRetryable: true,
       );
     }

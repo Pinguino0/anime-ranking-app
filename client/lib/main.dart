@@ -27,6 +27,8 @@ import 'features/groups/data/groups_repository.dart';
 import 'features/groups/presentation/groups_controller.dart';
 import 'features/history/data/history_repository.dart';
 import 'features/history/presentation/history_controller.dart';
+import 'features/home/data/home_activities_repository.dart';
+import 'features/home/home_controller.dart';
 import 'features/notifications/data/device_token_repository.dart';
 import 'features/notifications/data/firebase_push_messaging.dart';
 import 'features/notifications/data/push_messaging.dart';
@@ -167,6 +169,13 @@ Future<void> main() async {
       // far credere che non ci sia niente da riprendere.
       historyRepositoryProvider.overrideWithValue(
         SupabaseHistoryRepository(client),
+      ),
+      // Feed delle attivita' dei gruppi, per la sezione "Attivita' degli
+      // amici": legge `activities`, che i trigger del database riempiono gia'
+      // con voti, watchlist e avanzamenti. Stesso client e stessa regola degli
+      // altri moduli.
+      homeActivitiesRepositoryProvider.overrideWithValue(
+        SupabaseHomeActivitiesRepository(client),
       ),
       // Le versioni pubblicate, lette una volta all'avvio. Va dichiarato qui
       // con la stessa regola degli altri moduli: il provider di default

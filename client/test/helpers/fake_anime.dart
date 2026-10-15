@@ -168,6 +168,33 @@ class FakeAnimeRepository implements AnimeRepository {
     return List.unmodifiable(recentEpisodesResult.take(limit));
   }
 
+  int popularCalls = 0;
+
+  /// Anime restituiti dalla query "più popolari" finta.
+  ///
+  /// `null` significa "ordina davvero i dati in memoria per popolarita'": un
+  /// test che vuole verificare l'ordinamento lascia il campo vuoto, uno che
+  /// vuole controllare quali titoli compaiono lo riempie.
+  List<AnimeEntry>? popularResult;
+
+  AnimeFailure? popularFailure;
+
+  @override
+  Future<List<AnimeEntry>> popular({int limit = 20}) async {
+    popularCalls++;
+    final failure = popularFailure;
+    if (failure != null) throw failure;
+
+    final pool =
+        popularResult ??
+        ([..._rows]
+          ..sort(
+            (a, b) => (b.popularity ?? 0).compareTo(a.popularity ?? 0),
+          ));
+
+    return List.unmodifiable(pool.take(limit));
+  }
+
   @override
   Future<List<AnimeGenre>> genres() async {
     genresCalls++;

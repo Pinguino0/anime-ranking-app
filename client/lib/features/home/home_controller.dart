@@ -1,273 +1,341 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../anime/data/anime_repository.dart';
-import '../anime/presentation/anime_controller.dart';
 import '../anime/domain/anime.dart';
+import '../anime/presentation/anime_controller.dart';
+import '../auth/presentation/auth_controller.dart';
+import '../groups/domain/group.dart';
+import '../groups/presentation/groups_controller.dart';
+import '../novita/novita_controller.dart';
+import '../ranking/domain/ranking.dart';
+import '../ranking/presentation/ranking_controller.dart';
+import '../watchlist/domain/watchlist.dart';
+import '../watchlist/presentation/watchlist_controller.dart';
+import 'data/home_activities_repository.dart';
+import 'domain/friend_activity.dart';
 
-/// Una riga della home: un titolo e gli anime da sfogliare in orizzontale.
-@immutable
-class HomeRow {
-  const HomeRow({required this.title, required this.entries, this.subtitle});
+/// Quanti titoli mostra una riga orizzontale della home.
+///
+/// Venti e' il numero che riempie una riga su desktop senza costringere a
+/// scaricare due schermate di contenuto per una sola sezione.
+const int homeRowSize = 20;
 
-  final String title;
+/// Repository del feed di attivita', iniettato in `main`.
+///
+/// Stessa regola degli altri moduli: in produzione non si costruisce qui ma si
+/// sovrascrive. Un `StateError` rumoroso e' meglio di una sezione social che
+/// finge di non avere nulla da mostrare.
+final homeActivitiesRepositoryProvider = Provider<HomeActivitiesRepository>((
+  ref,
+) {
+  throw StateError(
+    'homeActivitiesRepositoryProvider non e stato inizializzato.',
+  );
+});
 
-  /// Sotto il titolo: dice perche' questi titoli sono qui ("voto medio 8.4",
-  /// "stagione corrente"). Una riga senza spiegazione costringe l'utente a
-  /// indovinare il criterio con cui e' stata scelta.
-  final String? subtitle;
+/// Il gruppo di riferimento per le sezioni condivise della home.
+///
+/// Classifica e attivita' sono legate a un gruppo: senza sceglierne uno,
+/// "i piu' votati dalla community" e "attivita' degli amici" non saprebbero di
+/// quale gruppo parlare. Si preferisce un gruppo che l'utente possiede — e' li'
+/// che la sua attivita' pesa di piu' — altrimenti il primo. `null` quando non
+/// ha gruppi: in quel caso le due sezioni spariscono invece di inventare una
+/// community.
+final primaryGroupProvider = Provider<AsyncValue<AnimeGroup?>>((ref) {
+  return ref.watch(groupsListProvider).whenData(primaryGroupOf);
+});
 
-  final List<AnimeEntry> entries;
-
-  /// true se la riga non ha nulla da mostrare.
-  bool get isEmpty => entries.isEmpty;
+/// Sceglie il gruppo di riferimento da un elenco, in modo deterministico.
+@visibleForTesting
+AnimeGroup? primaryGroupOf(List<AnimeGroup> groups) {
+  if (groups.isEmpty) return null;
+  for (final group in groups) {
+    if (group.myRole == GroupRole.owner) return group;
+  }
+  for (final group in groups) {
+    if (group.myRole.canManage) return group;
+  }
+  return groups.first;
 }
 
-/// Contenuto della home.
+/// L'anime in evidenza nel banner.
 ///
-/// I titoli non vengono scaricati tre volte per tre righe diverse: una sola
-/// lettura del catalogo alimenta tutte le righe, e ogni riga la riordina per il
-/// proprio criterio. Costa meno di tre richieste e, soprattutto, i tre
-/// elenchi restano coerenti fra loro: non puo' succedere che "aggiornati" e
-/// "votati" mostrino lo stesso anime in posizioni diverse senza che ve ne sia
-/// un motivo.
-@immutable
-class HomeFeed {
-  const HomeFeed({required this.rows, this.feature, this.catalog = const []});
+/// Prima scelta fra quelli della stagione corrente, che e' cio' che interessa
+/// adesso; se la stagione non arriva si ripiega sui piu' popolari. Quando non
+/// c'e' ne' l'una ne' gli altri vale `null` e la home mostra un invito alla
+/// ricerca invece di un banner vuoto. Un guasto di una delle due sorgenti non
+/// fa sparire il banner se l'altra ha risposto.
+final featuredAnimeProvider = FutureProvider<AnimeEntry?>((ref) async {
+  try {
+    final pick = featuredOf(await ref.watch(upcomingAnimeProvider.future));
+    if (pick != null) return pick;
+  } on Exception {
+    // La stagione e' un di piu': senza di lei si prova con i popolari.
+  }
 
-  final List<HomeRow> rows;
+  try {
+    return featuredOf(await ref.watch(popularAnimeProvider.future));
+  } on Exception {
+    return null;
+  }
+});
 
-  /// Opera in evidenza nel banner.
+/// Sceglie l'opera del banner in modo stabile.
+///
+/// Il banner non deve cambiare a ogni ricostruzione: un titolo che cambia
+/// mentre si guarda la schermata sembra un difetto. Il giorno dell'anno come
+/// indice cambia la scelta una volta al giorno e mai prima, e la funzione e'
+/// pura perche' il test possa fissare la data. Si preferiscono le opere con
+/// copertina, perche' un banner senza immagine non e' un banner.
+@visibleForTesting
+AnimeEntry? featuredOf(List<AnimeEntry> pool, {DateTime? now}) {
+  if (pool.isEmpty) return null;
+
+  final withImage = [
+    for (final entry in pool)
+      if ((entry.imageUrl ?? '').isNotEmpty) entry,
+  ];
+  final candidates = withImage.isEmpty ? pool : withImage;
+
+  final at = now ?? DateTime.now();
+  final day = at.difference(DateTime(at.year, 1, 1)).inDays;
+  return candidates[day % candidates.length];
+}
+
+/// Gli anime che piu' persone hanno in lista.
+final popularAnimeProvider = FutureProvider<List<AnimeEntry>>((ref) {
+  return ref.watch(animeRepositoryProvider).popular(limit: homeRowSize);
+});
+
+/// I piu' votati dalla community di AnimeRank.
+///
+/// Non e' il voto esterno: e' la media dei voti lasciati dai membri del gruppo
+/// di riferimento, ordinata dal backend. Vuota quando l'utente non ha gruppi,
+/// e la sezione si nasconde.
+final communityTopProvider =
+    Provider<AsyncValue<List<SpecialRankingEntry>>>((ref) {
+      final group = ref.watch(primaryGroupProvider).asData?.value;
+      if (group == null) {
+        return const AsyncValue.data(<SpecialRankingEntry>[]);
+      }
+      return ref.watch(
+        specialRankingProvider((group.id, SpecialRankingKind.top)),
+      );
+    });
+
+/// Il voto della community sull'opera in evidenza, se il gruppo l'ha votata.
+///
+/// Il banner lo mostra **solo** quando esiste: un voto esterno spacciato per
+/// voto del gruppo sarebbe la cosa piu' facile da fare e la meno onesta. La
+/// ricerca e' fra le prime posizioni del gruppo, che sono gia' caricate per la
+/// sezione dedicata: nessuna richiesta in piu'.
+final featuredCommunityScoreProvider = Provider<SpecialRankingEntry?>((ref) {
+  final animeId = ref.watch(featuredAnimeProvider).asData?.value?.id;
+  if (animeId == null) return null;
+
+  final top = ref.watch(communityTopProvider).asData?.value ?? const [];
+  for (final row in top) {
+    if (row.animeId == animeId) return row;
+  }
+  return null;
+});
+
+/// Le ultime azioni degli altri membri dei gruppi.
+final friendActivityProvider = FutureProvider<List<FriendActivity>>((
+  ref,
+) async {
+  final groups =
+      ref.watch(groupsListProvider).asData?.value ?? const <AnimeGroup>[];
+  final userId = ref.watch(authStatusProvider).user?.id;
+  if (groups.isEmpty || userId == null) return const [];
+
+  return ref
+      .watch(homeActivitiesRepositoryProvider)
+      .friendActivity(
+        groupIds: [for (final group in groups) group.id],
+        forUserId: userId,
+        limit: homeRowSize,
+      );
+});
+
+/// Le regole con cui si decide se c'e' abbastanza segnale per consigliare.
+class RecommendationRules {
+  const RecommendationRules._();
+
+  /// Quante volte un genere deve ricorrere per essere "il preferito".
   ///
-  /// Va decisa qui e non nella schermata perche' la scelta dipende dai dati:
-  /// il banner prende il primo dei piu' votati fra le quattro righe, cosi' non
-  /// capita mai che lo stesso anime sia contemporaneamente il banner e la
-  /// prima card della prima riga sotto.
-  final AnimeEntry? feature;
+  /// Con una sola occorrenza il consiglio sarebbe casuale travestito da
+  /// personalizzazione: due e' il minimo per dire che un genere torna.
+  static const int minGenreHits = 2;
 
-  /// Ultimi titoli del catalogo, per la griglia "tutti gli anime".
-  final List<AnimeEntry> catalog;
-
-  static const empty = HomeFeed(rows: []);
+  /// Da che voto in su un anime conta come "piaciuto".
+  static const double lovedScore = 7;
 }
 
-/// Provider dei titoli della home.
-///
-/// `keepAlive` e' il punto: senza, leaving e rientrando nella schermata
-/// rifarebbe la richiesta ogni volta, e l'utente che torna dal profilo
-/// aspetterebbe di nuovo la stessa lista. Con, la home resta in memoria e si
-/// aggiorna solo quando lo si chiede esplicitamente con [refresh].
-final homeFeedProvider =
-    AsyncNotifierProvider<HomeFeedController, HomeFeed>(HomeFeedController.new);
+/// Il segnale personale su cui si basa "Consigliati per te".
+@immutable
+class RecommendationSignal {
+  const RecommendationSignal({
+    this.genre,
+    this.savedAnimeIds = const {},
+    this.lovedAnimeIds = const {},
+  });
 
-/// Quanto tempo la home resta valida prima di essere ricaricata da sola.
-///
-/// Non e' "per sempre": il catalogo cambia, e una home congelata per giorni
-/// mostrerebbe serie finite da anni. Non e' "sempre": un'ora non serve a
-/// niente per dati che non cambiano al minuto.
-const _homeTtl = Duration(hours: 6);
+  /// Il genere che ricorre di piu' fra i dati personali, `null` se il segnale
+  /// e' troppo debole.
+  final String? genre;
 
-class HomeFeedController extends AsyncNotifier<HomeFeed> {
-  /// Quando i dati sono stati presi, per decidere se sono scaduti.
-  DateTime? _loadedAt;
+  /// Anime gia' in watchlist, da non riproporre.
+  final Set<String> savedAnimeIds;
+
+  /// Anime gia' votati bene, da non riproporre: consigliare qualcosa che
+  /// l'utente ha gia' votato vuol dire non averlo ascoltato.
+  final Set<String> lovedAnimeIds;
+
+  /// Tutto quello che non va rimostrato sotto "Consigliati per te".
+  Set<String> get excludeAnimeIds => {...savedAnimeIds, ...lovedAnimeIds};
+
+  static const empty = RecommendationSignal();
+}
+
+/// Il segnale personale: generi della watchlist piu' i generi degli anime
+/// votati bene in AnimeRank.
+final recommendationSignalProvider = Provider<RecommendationSignal>((ref) {
+  final saved =
+      ref.watch(myListProvider).asData?.value ?? const <WatchlistEntry>[];
+  final group = ref.watch(primaryGroupProvider).asData?.value;
+
+  final loved = <String>[];
+  final lovedIds = <String>{};
+  if (group != null) {
+    final rows =
+        ref.watch(rankingProvider(group.id)).asData?.value ??
+        const <RankingEntry>[];
+    for (final row in rows) {
+      final score = row.myScore;
+      if (score != null && score >= RecommendationRules.lovedScore) {
+        loved.addAll(row.genres);
+        lovedIds.add(row.animeId);
+      }
+    }
+  }
+
+  return RecommendationSignal(
+    genre: favouriteGenre([
+      for (final entry in saved) ...entry.genres,
+      ...loved,
+    ]),
+    savedAnimeIds: {for (final entry in saved) entry.animeId},
+    lovedAnimeIds: lovedIds,
+  );
+});
+
+/// Il genere che ricorre di piu', se ricorre abbastanza da valere un consiglio.
+///
+/// Pura e deterministica: a parita' di conteggio vince il genere che viene
+/// prima in ordine alfabetico, cosi' due ricostruzioni danno lo stesso
+/// risultato.
+@visibleForTesting
+String? favouriteGenre(Iterable<String> genres) {
+  final counts = <String, int>{};
+  for (final genre in genres) {
+    final trimmed = genre.trim();
+    if (trimmed.isEmpty) continue;
+    counts[trimmed] = (counts[trimmed] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return null;
+
+  var best = '';
+  var bestCount = 0;
+  for (final entry in counts.entries) {
+    if (entry.value > bestCount ||
+        (entry.value == bestCount && entry.key.compareTo(best) < 0)) {
+      best = entry.key;
+      bestCount = entry.value;
+    }
+  }
+
+  return bestCount >= RecommendationRules.minGenreHits ? best : null;
+}
+
+/// Altri anime del genere preferito, esclusi quelli gia' in lista.
+///
+/// Vuota quando non c'e' un segnale abbastanza forte: e' meglio non mostrare
+/// la sezione che intitolarla "Consigliati per te" mostrando titoli a caso.
+final recommendedAnimeProvider = FutureProvider<List<AnimeEntry>>((
+  ref,
+) async {
+  final signal = ref.watch(recommendationSignalProvider);
+  final genre = signal.genre;
+  if (genre == null) return const [];
+
+  final page = await ref.watch(animeRepositoryProvider).searchLocal(
+    '',
+    filters: AnimeFilters(genres: [genre]),
+    limit: homeRowSize * 3,
+  );
+
+  final exclude = signal.excludeAnimeIds;
+  final picks = [
+    for (final entry in page.results)
+      if (!exclude.contains(entry.id) && !exclude.contains(entry.externalId))
+        entry,
+  ];
+
+  return picks.take(homeRowSize).toList();
+});
+
+/// L'anime della sezione "Anime casuale".
+///
+/// Un [Notifier] e non un provider puro perche' la scelta deve poter cambiare
+/// **su richiesta** e restare ferma altrimenti: se fosse ricalcolata a ogni
+/// ricostruzione, il titolo cambierebbe mentre l'utente legge la card, cosa che
+/// nessuna sezione "casuale" dovrebbe fare.
+///
+/// Il passo e' almeno 1 e al massimo `lunghezza - 1`: cosi' il nuovo titolo non
+/// e' mai lo stesso di quello appena mostrato.
+class RandomAnimeController extends Notifier<AnimeEntry?> {
+  final Random _random = Random();
+  int _cursor = 0;
+
+  List<AnimeEntry> _pool() => [
+    // Solo opere votabili: senza id interno la card non porterebbe da nessuna
+    // parte, e un "Scopri" che non apre niente e' peggio di una sezione in meno.
+    for (final entry in ref.watch(popularAnimeProvider).asData?.value ?? const [])
+      if (entry.canRate) entry,
+  ];
 
   @override
-  Future<HomeFeed> build() async {
-    ref.keepAlive();
-    return _load();
+  AnimeEntry? build() {
+    final pool = _pool();
+    if (pool.isEmpty) return null;
+    _cursor %= pool.length;
+    return pool[_cursor];
   }
 
-  Future<HomeFeed> _load() async {
-    final repository = ref.watch(animeRepositoryProvider);
-    _loadedAt = DateTime.now();
-    return _build(repository);
+  /// Sceglie un altro titolo, mai lo stesso.
+  void shuffle() {
+    final pool = _pool();
+    if (pool.length <= 1) return;
+    _cursor = (_cursor + 1 + _random.nextInt(pool.length - 1)) % pool.length;
+    ref.invalidateSelf();
   }
+}
 
-  Future<HomeFeed> _build(AnimeRepository repository) async {
-    // La stagione corrente viene da un endpoint dedicato ed e' l'unica riga
-    // che ha senso mostrare anche quando il catalogo locale e' ancora vuoto,
-    // perche' arriva fresca dal catalogo esterno. Se fallisce non pero' si
-    // trascina dietro tutta la home: e' un di piu', quindi l'errore si ignora
-    // qui e le altre righe si costruiscono lo stesso.
-    List<AnimeEntry> season = const [];
-    try {
-      season = await repository.currentSeason(limit: 20);
-    } catch (_) {
-      // Riga mancante, home intatta.
-    }
-
-    // Stesso patto della stagione: se la lettura fallisce la riga sparisce e il
-    // resto della home resta in piedi. "Nuovi episodi" e' un di piu' e non vale
-    // un guasto della pagina.
-    List<AnimeEntry> fresh = const [];
-    try {
-      fresh = await repository.recentEpisodes(limit: 20);
-    } catch (_) {
-      // Riga mancante, home intatta.
-    }
-
-    // Il catalogo locale alimenta le altre righe e la griglia. Se questa
-    // lettura fallisce l'errore si propaga: e' un guasto vero, e mostrare la
-    // season da sola farebbe credere all'utente di vedere tutta la home.
-    //
-    // 120 righe e non 60: la griglia finale mostra il catalogo per intero e un
-    // paio di righe in piu' non si vedono, mentre a 60 la griglia sembrerebbe
-    // piu' corta del catalogo che contiene.
-    final results = await repository.searchLocal('', limit: 120, offset: 0);
-
-    if (results.results.isEmpty && season.isEmpty) return HomeFeed.empty;
-
-    final entries = results.results;
-
-    final top = _row(
-      title: 'I piu votati',
-      subtitle: 'Voto piu alto del catalogo',
-      entries: entries,
-      compare: (a, b) {
-        final byScore = _compareNullableDesc(a.score, b.score);
-        if (byScore != 0) return byScore;
-        return _compareNullableDesc(a.airedFrom, b.airedFrom);
-      },
+final randomAnimeProvider =
+    NotifierProvider<RandomAnimeController, AnimeEntry?>(
+      RandomAnimeController.new,
     );
 
-    // Il banner prende il primo dei piu' votati e quella riga perde il primo
-    // elemento: altrimenti l'utente vede la stessa locandina due volte a tre
-    // schermate di distanza e sembra che l'app non stia caricando nulla di
-    // nuovo.
-    final feature = top.entries.isEmpty ? null : top.entries.first;
-
-    return HomeFeed(
-      feature: feature,
-      catalog: entries,
-      rows: [
-        if (season.isNotEmpty)
-          HomeRow(
-            title: 'In uscita ora',
-            subtitle: 'Aggiornamenti della stagione corrente',
-            entries: season,
-          ),
-        if (fresh.isNotEmpty)
-          HomeRow(
-            title: 'Nuovi episodi',
-            subtitle: 'Le ultime puntate aggiunte',
-            entries: fresh,
-          ),
-        _row(
-          title: 'Aggiornati di recente',
-          subtitle: 'Le ultime uscite nel catalogo',
-          entries: entries,
-          compare: (a, b) {
-            // `null` in coda: un anime senza data non e' fra i piu' recenti, ma
-            // non e' nemmeno da buttare, quindi resta in fondo invece di sparire.
-            final byDate = _compareNullableDesc(a.airedFrom, b.airedFrom);
-            if (byDate != 0) return byDate;
-            return _byScore(a, b);
-          },
-        ),
-        HomeRow(
-          title: top.title,
-          subtitle: top.subtitle,
-          entries: feature == null ? top.entries : top.entries.skip(1).toList(),
-        ),
-        _row(
-          title: 'I piu popolari',
-          subtitle: 'I piu cercati sul catalogo',
-          entries: entries,
-          compare: (a, b) {
-            final byPopularity = _compareNullableDesc(a.popularity, b.popularity);
-            if (byPopularity != 0) return byPopularity;
-            return _byScore(a, b);
-          },
-        ),
-        // "Per te" e' la coda della lista ordinata per voto e data, non una
-        // raccomandazione: il backend non ha un profilo di gusti da cui
-        // ricavarla, e mostrare un titolo a caso sotto un'etichetta che promette
-        // una scelta personale sarebbe una bugia. Qui l'etichetta dice cosa fa
-        // davvero — mescola i due criteri — cosi' la riga resta utile.
-        _row(
-          title: 'Per te',
-          subtitle: 'Voto alto e uscita recente',
-          entries: entries,
-          compare: (a, b) {
-            // Somma dei due criteri normalizzati: e' il modo piu' semplice per
-            // non far coincidere questa riga con le due precedenti, che sono
-            // gia' ordinate per uno dei due.
-            final byScore = _blend(a, b, (e) => e.score ?? 0);
-            if (byScore != 0) return byScore;
-            return _compareNullableDesc(a.airedFrom, b.airedFrom);
-          },
-        ),
-      ],
-    );
-  }
-
-  /// Confronto su un punteggio composto.
-  ///
-  /// Il peso della data e' volutamente basso rispetto al voto: un anime uscito
-  /// tre anni fa con voto 9 e uno uscito ieri con voto 7 devono stare vicini,
-  /// e il peso alto della data li separerebbe come se fossero due cose diverse.
-  static int _blend(AnimeEntry a, AnimeEntry b, double Function(AnimeEntry) read) {
-    const dateWeight = 0.25;
-    final now = DateTime.now();
-    // Gli anni senza data contano come zero: si mettono in fondo invece di
-    // far saltare l'ordinamento.
-    double years(AnimeEntry e) {
-      final from = e.airedFrom;
-      if (from == null) return 0;
-      return ((now.difference(from).inDays) / 365).clamp(0, 25);
-    }
-
-    final scoreA = read(a) - dateWeight * years(a);
-    final scoreB = read(b) - dateWeight * years(b);
-    return scoreB.compareTo(scoreA);
-  }
-
-  /// Una riga, scartata se troppo corta per essere un carosello.
-  ///
-  /// Una riga con due titoli e' solo rumore: meglio non averla che mostrare
-  /// uno striscia vuota che sembra un caricamento fallito.
-  HomeRow _row({
-    required String title,
-    required String? subtitle,
-    required List<AnimeEntry> entries,
-    required int Function(AnimeEntry, AnimeEntry) compare,
-  }) {
-    final sorted = [...entries]..sort(compare);
-    return HomeRow(
-      title: title,
-      subtitle: subtitle,
-      entries: sorted.take(20).toList(),
-    );
-  }
-
-  static int _byScore(AnimeEntry a, AnimeEntry b) =>
-      _compareNullableDesc(a.score, b.score);
-
-  /// Confronto decrescente che mette in fondo i valori mancanti.
-  ///
-  /// Serve perche' `null` non e' confrontabile con `>` in Dart: senza questo,
-  /// un anime senza voto fa crashare l'ordinamento invece di finire in coda.
-  static int _compareNullableDesc(Object? a, Object? b) {
-    if (a == null && b == null) return 0;
-    if (a == null) return 1;
-    if (b == null) return -1;
-    return (b as Comparable).compareTo(a);
-  }
-
-  /// Ricarica esplicita: tirare la schermata verso il basso.
-  Future<void> refresh() async {
-    state = const AsyncValue<HomeFeed>.loading();
-    state = await AsyncValue.guard(() => _load());
-  }
-
-  /// La home e' scaduta?
-  ///
-  /// Esposto per la schermata, che lo usa per proporre l'aggiornamento senza
-  /// farlo da sola: se si ricaricasse da sola, tornare indietro dalla scheda di
-  /// un anime ripeterebbe la richiesta.
-  bool get isStale {
-    final at = _loadedAt;
-    if (at == null) return true;
-    return DateTime.now().difference(at) > _homeTtl;
-  }
+/// Etichetta della stagione corrente, calcolata dalla data.
+///
+/// Dicembre appartiene all'inverno dell'anno dopo: senza lo scarto la home
+/// direbbe "Inverno 2026" a dicembre, quando la stagione in corso e' quella del
+/// 2027.
+String currentSeasonLabel(DateTime now) {
+  final season = AnimeSeason.fromMonth(now.month);
+  final year = now.month == 12 ? now.year + 1 : now.year;
+  return '${season?.label ?? 'Stagione'} $year';
 }
