@@ -148,6 +148,6 @@ non serve nessun fallback SPA lato server: è il motivo per cui non ci sono
    potrebbero fallire per CORS/Referer. Le fonti risolte dal server funzionano.
 2. **Push di sistema sul web**: spenti di proposito. Per accenderli servono
    un'app Web su Firebase + chiave VAPID (§8 di `GUIDA_PWA_IPHONE.md`).
-3. **Prima build in CI**: da provare (non è stata eseguita qui). Il workflow usa
-   la stessa versione di Flutter e le stesse `--dart-define` della build locale
-   che è andata a buon fine.
+3. **Prima build in CI**: **verificata** — il workflow gira verde e il sito è
+   online su `https://pinguino0.github.io/anime-ranking-app/` (service worker
+   attivo, nessuna richiesta fallita, nessun errore JS).

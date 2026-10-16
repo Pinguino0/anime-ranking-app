@@ -80,31 +80,25 @@ progetto.
 
 ---
 
-## 4. Pubblicarla **gratis** (GitHub Pages)
+## 4. È già **online** (GitHub Pages)
 
-È già tutto pronto: c'è un workflow GitHub Actions che compila e pubblica da
-solo a ogni push. Ti resta **un solo passaggio da fare a mano**:
-
-1. Sul repo GitHub: **Settings → Pages**.
-2. In **Build and deployment → Source** scegli **GitHub Actions**.
-3. Fatto. Da ora, a ogni push che tocca `client/`, GitHub compila la PWA e la
-   mette online; il workflow si può anche lanciare a mano da **Actions → Web PWA
-   (GitHub Pages) → Run workflow**.
-
-L'indirizzo sarà:
+La PWA è **già pubblicata e funzionante**:
 
 ```
 https://pinguino0.github.io/anime-ranking-app/
 ```
 
-(il workflow ricava da solo il nome giusto dalla repo, quindi non va scritto a
-mano da nessuna parte).
+Il deploy è automatico: a ogni push che tocca `client/`, GitHub Actions compila
+la PWA e la mette online (workflow `.github/workflows/deploy-web-pwa.yml`). Si
+può anche lanciare a mano da **Actions → Web PWA (GitHub Pages) → Run workflow**.
 
-Il workflow è `.github/workflows/deploy-web-pwa.yml`.
+Il repository è stato reso **pubblico**: è il requisito per usare GitHub Pages
+gratis (sui repo privati Pages richiede il piano a pagamento). Prima di renderlo
+pubblico ho verificato che non ci fossero segreti nella storia del repo —
+`.secrets/` è ignorato da git e non è mai stato committato.
 
-**Requisito:** GitHub Pages gratuito funziona sui repository **pubblici**. Questo
-repo lo è già. Se un giorno lo rendi privato, Pages richiede GitHub Pro: in quel
-caso usa Netlify (§5).
+Verifica fatta sul sito pubblicato: service worker attivo, nessuna richiesta
+fallita, nessun errore JavaScript.
 
 ### Alternativa: Netlify (indirizzo tuo, senza sottocartella)
 
@@ -242,9 +236,10 @@ cd build\web ; python -m http.server 8080     # -> http://localhost:8080
 ## Riepilogo
 
 - **Obiettivo raggiunto:** AnimeRank gira su iPhone **a costo zero**, senza Apple
-  Developer e senza Mac.
-- **Cosa manca da fare a te:** (1) attivare Pages come sopra; (2) aprire
-  l'indirizzo su Safari e "Aggiungi a Home".
+  Developer e senza Mac. Il sito è già online:
+  **https://pinguino0.github.io/anime-ranking-app/**
+- **Cosa manca da fare a te:** aprire quell'indirizzo su **Safari** e fargli
+  **"Aggiungi a Home"** (§5). Non c'è altro da configurare.
 - **Limite principale:** il video dipende dalla fonte; il player del browser non
   sa fare tutto quello che fa mpv sul telefono.
 - **Facoltativo, più avanti:** abilitare i push web (serve un'app Web su Firebase
