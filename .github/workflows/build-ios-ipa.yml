@@ -54,7 +54,12 @@ jobs:
 
       - name: Dipendenze Flutter
         working-directory: client
-        run: flutter pub get
+        run: |
+          # L'integrazione Swift Package Manager di Flutter copia i plugin in
+          # build/ios/SourcePackages, ma la cartella deve esistere: su una
+          # macchina pulita (come questa CI) manca e rsync fallisce.
+          mkdir -p build/ios/SourcePackages
+          flutter pub get
 
       - name: Compila iOS (senza firma)
         working-directory: client
