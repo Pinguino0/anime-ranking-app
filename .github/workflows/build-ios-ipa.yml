@@ -32,12 +32,19 @@ on:
 jobs:
   build-ios:
     name: Compila .ipa per iPhone
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Seleziona l'ultimo Xcode stabile
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          # Serve Xcode 16.3+: l'SDK Firebase arrivato via Swift Package
+          # Manager richiede Swift tools 6.1, che prima non esiste.
+          xcode-version: latest-stable
 
       - name: Installa Flutter
         uses: subosito/flutter-action@v2
