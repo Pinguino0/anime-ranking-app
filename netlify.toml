@@ -1,0 +1,90 @@
+# ============================================================================
+# netlify.toml — deploy ALTERNATIVO della PWA AnimeRank
+# ============================================================================
+#
+# Questa e' la strada FACOLTATIVA. La strada principale e' GitHub Pages
+# (vedi `.github/workflows/deploy-web-pwa.yml`), che non richiede nessun
+# account oltre a GitHub e non ha bisogno di installare Flutter a mano.
+#
+# Usa Netlify se vuoi un indirizzo tuo (es. `animerank.netlify.app`) o un
+# dominio personalizzato senza la sottocartella `/anime-ranking-app/` che
+# GitHub Pages impone.
+#
+# Perche' il comando installa Flutter da solo
+# -------------------------------------------
+# L'immagine di build di Netlify non contiene Flutter: senza il blocco qui
+# sotto `flutter` non esiste e la build fallisce subito. Si clona la stessa
+# versione usata per il telefono, cosi' la PWA non diverge dall'app.
+#
+# Setup una tantum
+# ----------------
+#   1. https://app.netlify.com -> Add new site -> Import an existing project
+#   2. Collega GitHub e scegli il repo `anime-ranking-app`
+#   3. Base directory: `client`  (o lascia che usi questo file)
+#   4. Variabili d'ambiente (Site settings -> Environment variables):
+#        SUPABASE_URL          = https://sjbstiexythmapxmrfyp.supabase.co
+#        SUPABASE_ANON_KEY     = sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc
+#        ANIMERANK_RELAY       = https://animerank-relay.titanoeren171.workers.dev
+# ============================================================================
+
+[build]
+  base = "client"
+  publish = "build/web"
+  # Stringa letterale (apici singoli tripli): il `$(...)`, i `$VAR` e i
+  # backslash li interpreta la shell, non TOML.
+  command = '''
+    set -e
+    if [ ! -d "$HOME/flutter" ]; then
+      git clone https://github.com/flutter/flutter.git -b 3.47.5 --depth 1 "$HOME/flutter"
+    fi
+    export PATH="$HOME/flutter/bin:$PATH"
+    flutter --version
+    flutter build web --release --no-tree-shake-icons --no-wasm-dry-run \
+      --dart-define=SUPABASE_URL=$SUPABASE_URL \
+      --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
+      --dart-define=ANIMERANK_RELAY=$ANIMERANK_RELAY
+    sed -i "s/__BUILD_NUMBER__/${DEPLOY_ID:-$(date +%s)}/" build/web/sw.js
+  '''
+
+# Il service worker non va mai messo in cache: e' il file che dice al browser
+# che esiste una versione nuova.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Content-Type = "application/javascript; charset=utf-8"
+
+# La pagina e i manifest devono essere ricontrollati a ogni caricamento,
+# altrimenti l'utente non si accorge dell'aggiornamento.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/flutter_bootstrap.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Content-Type = "application/manifest+json"
+
+# Gli asset con nome stabile dentro cartelle "immutabili" possono stare in
+# cache a lungo: una build nuova li rigenera.
+[[headers]]
+  for = "/canvaskit/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"

@@ -4,7 +4,10 @@ import 'dart:io';
 
 import '../../../core/env/app_config.dart';
 import '../domain/episode.dart';
-import 'chromium_http.dart';
+// Su web `chromium_http.dart` tira dentro `cronet_http` → `dart:ffi`, che non
+// esiste sulla piattaforma: nel browser si carica lo stub, che dichiara
+// `supported == false` e lascia passare al trasporto successivo.
+import 'chromium_http.dart' if (dart.library.html) 'chromium_http_stub.dart';
 import 'doh_bypass.dart';
 
 /// Una risoluzione lato client non riuscita.

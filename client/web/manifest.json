@@ -1,0 +1,38 @@
+{
+    "name": "AnimeRank — catalogo e classifiche anime",
+    "short_name": "AnimeRank",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#05050A",
+    "theme_color": "#05050A",
+    "description": "Scopri, segna cosa stai guardando, vota episodio per episodio e guarda la classifica crescere insieme a quella dei tuoi amici.",
+    "orientation": "any",
+    "prefer_related_applications": false,
+    "categories": ["entertainment", "utilities"],
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

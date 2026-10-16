@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
@@ -233,6 +234,13 @@ Future<void> main() async {
 /// Android una build senza `google-services.json` non lo configura. In tutti
 /// quei casi l'app deve aprirsi lo stesso, solo senza push.
 Future<PushMessaging> _bootstrapPush() async {
+  // Sul web Firebase va configurato a parte (un'app web in console + una
+  // chiave VAPID per il Web Push): senza, `initializeApp` fallisce e riempie
+  // la console di errori a ogni avvio. Per la PWA il push e' semplicemente
+  // spento, che e' lo stato normale finche' non si configura il web push:
+  // le notifiche interne all'app funzionano lo stesso.
+  if (kIsWeb) return const UnsupportedPushMessaging();
+
   try {
     await Firebase.initializeApp();
   } catch (error, stack) {

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -46,10 +47,12 @@ const Duration _checkInterval = Duration(hours: 6);
 /// Non lancia mai: la pulizia e' di servizio, e se WorkManager non e'
 /// disponibile l'app deve partire lo stesso.
 Future<void> bootstrapUpdateMaintenance() async {
-  if (!Platform.isAndroid) {
+  // `kIsWeb` va controllato per primo: sul browser `Platform` non esiste e
+  // leggerlo solleverebbe un'eccezione prima ancora di arrivare al confronto.
+  if (kIsWeb || !Platform.isAndroid) {
     // Gli aggiornamenti e gli APK scaricati esistono solo su Android: su iOS li
-    // consegna TestFlight/App Store, quindi non c'e' niente da programmare e
-    // non e' un errore.
+    // consegna TestFlight/App Store, e sul web non ce ne sono affatto, quindi
+    // non c'e' niente da programmare e non e' un errore.
     return;
   }
 

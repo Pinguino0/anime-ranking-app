@@ -4,7 +4,10 @@ import 'dart:typed_data';
 
 import '../domain/episode.dart';
 import 'animeunity_extractor.dart';
-import 'chromium_http.dart';
+// Su web `chromium_http.dart` tira dentro `cronet_http` → `dart:ffi`, che non
+// esiste sulla piattaforma: nel browser si carica lo stub, che dichiara
+// `supported == false` e lascia passare al trasporto successivo.
+import 'chromium_http.dart' if (dart.library.html) 'chromium_http_stub.dart';
 import 'doh_bypass.dart';
 
 /// Chi sa riprodurre un episodio su una fonte di riserva.

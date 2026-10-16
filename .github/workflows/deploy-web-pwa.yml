@@ -1,0 +1,104 @@
+# ============================================================================
+# Web PWA su GitHub Pages — deploy gratuito e automatico
+# ============================================================================
+#
+# Cosa fa
+# -------
+# A ogni push che tocca il client, compila Flutter per la Web e pubblica il
+# risultato su GitHub Pages:
+#
+#     https://<utente>.github.io/<nome-repo>/
+#
+# Non serve nessun account a pagamento: GitHub Pages e' gratis sui repository
+# pubblici, e la compilazione gira su un runner di GitHub.
+#
+# Perche' non compilare su Netlify/Vercel
+# ---------------------------------------
+# Quei servizi non hanno Flutter nell'immagine di build: bisognerebbe installarlo
+# a mano a ogni build. GitHub Actions invece ha `subosito/flutter-action`, che
+# installa e mette in cache la versione esatta usata per il telefono.
+#
+# Setup una tantum (1 minuto)
+# ---------------------------
+#   Repo -> Settings -> Pages -> Build and deployment -> Source:
+#   scegli **GitHub Actions**. Non serve nient'altro.
+#
+# Nota sull'indirizzo
+# -------------------
+# Pages serve il sito sotto una sottocartella (`/<nome-repo>/`), quindi la
+# build passa `--base-href`: senza, l'app cercherebbe i suoi file nella radice
+# del dominio e resterebbe bianca.
+# ============================================================================
+
+name: Web PWA (GitHub Pages)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'client/**'
+      - '.github/workflows/deploy-web-pwa.yml'
+  workflow_dispatch: {}
+
+# Permessi minimi richiesti da GitHub Pages: scrivere la pagina e usare
+# l'identita' del run per il deploy.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un deploy alla volta: se arriva un push nuovo mentre il precedente e' in
+# corso, si annulla quello vecchio invece di pubblicare due volte.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Stessa versione della build Android/iOS: un salto di versione qui
+          # pubblicherebbe una PWA diversa dall'app che gira sul telefono.
+          flutter-version: '3.47.5'
+          cache: true
+
+      - name: Dipendenze
+        run: flutter pub get
+
+      - name: Build della PWA
+        run: >
+          flutter build web --release --no-tree-shake-icons --no-wasm-dry-run
+          --base-href "/${{ github.event.repository.name }}/"
+          --dart-define=SUPABASE_URL=https://sjbstiexythmapxmrfyp.supabase.co
+          --dart-define=SUPABASE_ANON_KEY=sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc
+          --dart-define=ANIMERANK_RELAY=https://animerank-relay.titanoeren171.workers.dev
+
+      - name: Versione del service worker
+        working-directory: .
+        run: >
+          sed -i "s/__BUILD_NUMBER__/${GITHUB_RUN_NUMBER}-$(date +%s)/"
+          client/build/web/sw.js
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: client/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
