@@ -1,0 +1,96 @@
+# ============================================================================
+# build-ios-ipa.yml - compila l'app per iPhone e produce un file .ipa
+# ============================================================================
+# Perche' esiste
+# --------------
+# Xcode esiste solo su macOS, quindi da Windows l'unico modo di produrre un
+# .ipa e' una macchina Mac. Questa e' quella di GitHub Actions: per i repo
+# PUBBLICI i minuti macOS sono gratuiti e illimitati.
+#
+# Cosa produce
+# ------------
+# Un .ipa NON firmato (--no-codesign). Va bene perche' lo installa TrollStore,
+# che firma da solo con il suo metodo (bug CoreTrust): nessun Apple ID, nessuna
+# scadenza. In alternativa lo firma AltStore/SideStore/Sideloadly col tuo
+# Apple ID gratuito (ma li' scade ogni 7 giorni).
+#
+# Come si usa
+# -----------
+#   - a mano: Actions -> "iOS IPA" -> Run workflow
+#   - oppure pushando un tag: git tag v0.0.19 && git push origin v0.0.19
+# Il file si scarica dall'output della run ("Artifacts" -> Animerank-ipa).
+# ============================================================================
+
+name: iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-ios:
+    name: Compila .ipa per iPhone
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Installa Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Versione degli strumenti
+        run: |
+          flutter --version
+          xcodebuild -version
+          pod --version || echo "CocoaPods non presente (forse non serve con SPM)"
+
+      - name: Dipendenze Flutter
+        working-directory: client
+        run: flutter pub get
+
+      - name: Compila iOS (senza firma)
+        working-directory: client
+        env:
+          # Stessa chiave PUBBLICABILE dell'APK Android: e' pubblica per
+          # definizione e puo' stare nel pacchetto. La secret key non entra mai.
+          SUPABASE_URL: 'https://sjbstiexythmapxmrfyp.supabase.co'
+          SUPABASE_ANON_KEY: 'sb_publishable_JqBGHeAUT068w6-Ex1L8OQ_f6OpCSMc'
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-number=${{ github.run_number }} \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Impacchetta in .ipa
+        working-directory: client
+        run: |
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERRORE: $APP_PATH non esiste. Build fallita."
+            ls -la build/ios/iphoneos || true
+            exit 1
+          fi
+          rm -rf build/ios/ipa
+          mkdir -p build/ios/ipa/Payload
+          cp -R "$APP_PATH" build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qry Animerank.ipa Payload
+          echo "IPA creata:"
+          ls -la Animerank.ipa
+          unzip -l Animerank.ipa | head -20
+
+      - name: Carica l'artefatto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Animerank-ipa
+          path: client/build/ios/ipa/Animerank.ipa
+          if-no-files-found: error
+          retention-days: 90
