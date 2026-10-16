@@ -87,7 +87,11 @@ jobs:
           sed -i "s/__BUILD_NUMBER__/${GITHUB_RUN_NUMBER}-$(date +%s)/"
           client/build/web/sw.js
 
+      # `enablement: true` crea/attiva GitHub Pages da solo se non lo e' gia':
+      # cosi' il deploy non dipende da un passaggio a mano nelle impostazioni.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
