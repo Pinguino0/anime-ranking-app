@@ -1,5 +1,13 @@
 # Guida — Animerank su iPhone (IPA + TestFlight)
 
+> **C'e' una strada gratuita.** Questa guida (TestFlight) richiede l'Apple
+> Developer Program a **99 $/anno**. Se il telefono ha **iOS 16.6.1 o precedente**
+> (oppure iOS 17.0 su iPhone XS/XR o piu' vecchi) si puo' installare l'app
+> **gratis e per sempre** con **TrollStore**: vedi `GUIDA_TROLLSTORE_IOS.md`.
+> La rotta TrollStore e' quella consigliata; questa guida resta per i telefoni
+> troppo nuovi per TrollStore (iOS 17.1+), dove l'unica alternativa senza
+> scadenze e' TestFlight.
+
 Come si mette Animerank su iPhone. Servono due servizi, entrambi gratis per il
 tuo volume:
 
